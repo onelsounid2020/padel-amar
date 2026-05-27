@@ -553,21 +553,7 @@ function EventsPage(props) {
 
             {eventTab === "event" && (
               <div className="organization-section">
-                <div className="data-block">
-                  <h3><CalendarPlus size={16} /> Crear evento</h3>
-                  <form onSubmit={submitEvent} className="event-form-grid">
-                    <input placeholder="Nombre" value={eventForm.name} onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })} required />
-                    <input type="date" value={eventForm.date} onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })} required />
-                    <input placeholder="Lugar" value={eventForm.place} onChange={(e) => setEventForm({ ...eventForm, place: e.target.value })} required />
-                    <input placeholder="Categorías del evento" value={eventForm.categories} onChange={(e) => setEventForm({ ...eventForm, categories: e.target.value })} required />
-                    <input type="number" placeholder="Precio" value={eventForm.price} onChange={(e) => setEventForm({ ...eventForm, price: e.target.value })} />
-                    <input placeholder="Horario" value={eventForm.schedule} onChange={(e) => setEventForm({ ...eventForm, schedule: e.target.value })} required />
-                    <input type="number" placeholder="Cupos" value={eventForm.capacity} onChange={(e) => setEventForm({ ...eventForm, capacity: e.target.value })} />
-                    <input placeholder="Tipo torneo" value={eventForm.tournament_type} onChange={(e) => setEventForm({ ...eventForm, tournament_type: e.target.value })} required />
-                    <textarea placeholder="Descripción" value={eventForm.description} onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} />
-                    <button><CalendarPlus size={16} /> Guardar evento</button>
-                  </form>
-                </div>
+                <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} />
               </div>
             )}
 
@@ -743,10 +729,33 @@ function EventsPage(props) {
             )}
           </>
         ) : (
-          <p className="empty">Crea o selecciona un evento para comenzar.</p>
+          <div className="organization-section">
+            <p className="empty">No hay eventos cargados todavía. Crea el primero para comenzar.</p>
+            <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} />
+          </div>
         )}
       </section>
     </section>
+  );
+}
+
+function EventForm({ form, setForm, onSubmit }) {
+  return (
+    <div className="data-block">
+      <h3><CalendarPlus size={16} /> Crear evento</h3>
+      <form onSubmit={onSubmit} className="event-form-grid">
+        <input placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+        <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+        <input placeholder="Lugar" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} required />
+        <input placeholder="Categorías del evento" value={form.categories} onChange={(e) => setForm({ ...form, categories: e.target.value })} required />
+        <input type="number" placeholder="Precio" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+        <input placeholder="Horario" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} required />
+        <input type="number" placeholder="Cupos" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+        <input placeholder="Tipo torneo" value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
+        <textarea placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <button><CalendarPlus size={16} /> Guardar evento</button>
+      </form>
+    </div>
   );
 }
 
