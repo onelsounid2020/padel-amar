@@ -929,10 +929,14 @@ function PaymentBlock({ payments, pairs, eventId, onChange }) {
     <article className="data-block">
       <h3><CreditCard size={16} /> Pagos</h3>
       {payments.map((payment) => {
-        const pair = pairs.find((item) => item.id === payment.pair_id);
+        const pair = payment.pair || pairs.find((item) => item.id === payment.pair_id);
+        const playerName = payment.player?.name || "Jugador";
         return (
           <div className="payment-row" key={payment.id}>
-            <span>{pair ? pairName(pair) : `Pareja ${payment.pair_id}`}</span>
+            <span>
+              <strong>{playerName}</strong>
+              <small>{pair ? pairName(pair) : `Pareja ${payment.pair_id}`}</small>
+            </span>
             <select
               value={payment.status}
               onChange={(e) => onChange(() => api.updatePayment(eventId, payment.id, { status: e.target.value }))}

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from app.models.payment import PaymentStatus
 from app.schemas.common import ORMModel
+from app.schemas.players import PairRead, PlayerRead
 
 
 class PaymentCreate(BaseModel):
@@ -22,7 +23,10 @@ class PaymentUpdate(BaseModel):
 class PaymentRead(ORMModel):
     id: int
     event_id: int
-    pair_id: int
+    pair_id: int | None = None
+    player_id: int | None = None
     amount: int
     status: PaymentStatus
     updated_at: datetime
+    pair: PairRead | None = None
+    player: PlayerRead | None = None

@@ -2,6 +2,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.match import Match
+from app.models.payment import Payment, PaymentStatus, PlayerPayment
 from app.models.player import EventPair, PairStatus
 from app.models.standing import Standing
 
@@ -574,6 +575,44 @@ def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
 
     db.commit()
     return ordered
+
+
+def sync_player_payments(db: Session, event_id: int) -> list[PlayerPayment]:
+    pairs = db.scalars(select(EventPair).where(EventPair.event_id == event_id)).all()
+    legacy_by_pair = {
+        payment.pair_id: payment
+        for payment in db.scalars(select(Payment).where(Payment.event_id == event_id)).all()
+    }
+    existing = {
+        (payment.pair_id, payment.player_id): payment
+        for payment in db.scalars(select(PlayerPayment).where(PlayerPayment.event_id == event_id)).all()
+    }
+    valid_keys: set[tuple[int, int]] = set()
+
+    for pair in pairs:
+        player_ids = [pair.player_one_id, pair.player_two_id]
+        for player_id in [item for item in player_ids if item is not None]:
+            key = (pair.id, player_id)
+            valid_keys.add(key)
+            if key in existing:
+                continue
+            legacy = legacy_by_pair.get(pair.id)
+            db.add(
+                PlayerPayment(
+                    event_id=event_id,
+                    pair_id=pair.id,
+                    player_id=player_id,
+                    amount=legacy.amount if legacy else 0,
+                    status=legacy.status if legacy else PaymentStatus.pendiente,
+                )
+            )
+
+    for key, payment in existing.items():
+        if key not in valid_keys:
+            db.delete(payment)
+
+    db.commit()
+    return list(db.scalars(select(PlayerPayment).where(PlayerPayment.event_id == event_id)))
 
 
 def format_pair(pair: EventPair) -> str:

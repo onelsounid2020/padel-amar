@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.models.event import Event
 from app.models.match import Match
-from app.models.payment import Payment, PaymentStatus
+from app.models.payment import PlayerPayment, PaymentStatus
 from app.models.player import EventPair, PairStatus
 from app.schemas.events import DashboardEvent, EventCreate, EventRead, EventUpdate
-from app.services import format_pair
+from app.services import format_pair, sync_player_payments
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -38,10 +38,11 @@ def dashboard(db: Session = Depends(get_db)) -> list[DashboardEvent]:
                 EventPair.status != PairStatus.lista_espera,
             )
         ) or 0
+        sync_player_payments(db, event.id)
         pending = db.scalar(
-            select(func.count(Payment.id)).where(
-                Payment.event_id == event.id,
-                Payment.status != PaymentStatus.pagado,
+            select(func.count(PlayerPayment.id)).where(
+                PlayerPayment.event_id == event.id,
+                PlayerPayment.status != PaymentStatus.pagado,
             )
         ) or 0
         completed = db.scalar(
@@ -94,13 +95,12 @@ def whatsapp_text(event_id: int, db: Session = Depends(get_db)) -> dict[str, str
         .options(selectinload(EventPair.player_one), selectinload(EventPair.player_two))
         .order_by(EventPair.seed.is_(None), EventPair.seed, EventPair.created_at)
     ).all()
-    pending = db.scalars(select(Payment).where(Payment.event_id == event_id, Payment.status != PaymentStatus.pagado)).all()
+    sync_player_payments(db, event_id)
+    pending = db.scalars(select(PlayerPayment).where(PlayerPayment.event_id == event_id, PlayerPayment.status != PaymentStatus.pagado)).all()
     matches = db.scalars(select(Match).where(Match.event_id == event_id, Match.winner_pair_id.is_not(None))).all()
 
     active_pairs = [pair for pair in pairs if pair.status != PairStatus.lista_espera]
     waitlist = [pair for pair in pairs if pair.status == PairStatus.lista_espera]
-    pending_pair_ids = {payment.pair_id for payment in pending}
-
     lines = [
         f"*{event.name}*",
         f"Fecha: {event.date.strftime('%d-%m-%Y')}",
@@ -113,7 +113,14 @@ def whatsapp_text(event_id: int, db: Session = Depends(get_db)) -> dict[str, str
         *[f"- {format_pair(pair)}" for pair in active_pairs],
         "",
         "*Pagos pendientes/abonados*",
-        *[f"- {format_pair(pair)}" for pair in active_pairs if pair.id in pending_pair_ids],
+        *(
+            [
+                f"- {payment.player.name}: {payment.status.value}"
+                for payment in pending
+                if payment.player is not None
+            ]
+            or ["- Sin pagos pendientes"]
+        ),
         "",
         "*Lista de espera*",
         *([f"- {format_pair(pair)}" for pair in waitlist] or ["- Sin lista de espera"]),

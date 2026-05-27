@@ -1146,6 +1146,24 @@ h3 {
   padding: 8px 0;
 }
 
+.payment-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.payment-row strong {
+  color: #08223b;
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.payment-row small {
+  color: #5b6d67;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
 .match-list {
   display: grid;
   gap: 8px;

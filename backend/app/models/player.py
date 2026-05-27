@@ -31,6 +31,7 @@ class Player(Base):
 
     pairs_as_player_one = relationship("EventPair", back_populates="player_one", foreign_keys="EventPair.player_one_id")
     pairs_as_player_two = relationship("EventPair", back_populates="player_two", foreign_keys="EventPair.player_two_id")
+    payments = relationship("PlayerPayment", back_populates="player", cascade="all, delete-orphan")
 
 
 class EventPair(Base):
@@ -49,4 +50,5 @@ class EventPair(Base):
     player_one = relationship("Player", foreign_keys=[player_one_id], back_populates="pairs_as_player_one")
     player_two = relationship("Player", foreign_keys=[player_two_id], back_populates="pairs_as_player_two")
     payments = relationship("Payment", back_populates="pair", cascade="all, delete-orphan")
+    player_payments = relationship("PlayerPayment", back_populates="pair", cascade="all, delete-orphan")
     standings = relationship("Standing", back_populates="pair", cascade="all, delete-orphan")

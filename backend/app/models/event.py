@@ -24,5 +24,6 @@ class Event(Base):
 
     pairs = relationship("EventPair", back_populates="event", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="event", cascade="all, delete-orphan")
+    player_payments = relationship("PlayerPayment", back_populates="event", cascade="all, delete-orphan")
     matches = relationship("Match", back_populates="event", cascade="all, delete-orphan")
     standings = relationship("Standing", back_populates="event", cascade="all, delete-orphan")
