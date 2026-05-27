@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date as DateType, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel
 
@@ -16,6 +16,7 @@ class EventBase(BaseModel):
     schedule: str
     capacity: int
     tournament_type: str
+    category_configs: list[dict] = Field(default_factory=list)
     description: str | None = None
     is_active: bool = True
 
@@ -33,6 +34,7 @@ class EventUpdate(BaseModel):
     schedule: str | None = None
     capacity: int | None = None
     tournament_type: str | None = None
+    category_configs: list[dict] | None = None
     description: str | None = None
     is_active: bool | None = None
 

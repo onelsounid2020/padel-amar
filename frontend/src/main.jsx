@@ -26,6 +26,7 @@ const emptyEvent = {
   schedule: "",
   capacity: 16,
   tournament_type: "Americano",
+  category_configs: [],
   description: "",
   is_active: true,
 };
@@ -42,6 +43,41 @@ const emptyPublicRegistration = {
   partner_preferred_side: "indiferente",
 };
 const emptyPublicResult = { round_name: "", match_id: "", pair_one_score: "", pair_two_score: "" };
+
+const modalityOptions = [
+  { value: "five_consecutive", label: "5 partidos seguidos" },
+  { value: "group_ranking_best", label: "Ranking por grupos, clasifica el mejor" },
+  { value: "round_robin_groups", label: "Todos contra todos por grupos" },
+  { value: "ranking_only", label: "Solo ranking" },
+];
+
+const defaultCategoryConfig = {
+  category: "",
+  modality: "five_consecutive",
+  group_size: 4,
+  guaranteed_matches: 5,
+  qualifiers_per_group: 1,
+  notes: "",
+};
+
+const amarTodayCategoryConfigs = [
+  {
+    category: "5ta",
+    modality: "five_consecutive",
+    group_size: 6,
+    guaranteed_matches: 5,
+    qualifiers_per_group: 0,
+    notes: "5 partidos seguidos por grupo.",
+  },
+  {
+    category: "4ta",
+    modality: "group_ranking_best",
+    group_size: 4,
+    guaranteed_matches: 3,
+    qualifiers_per_group: 1,
+    notes: "3 partidos de ranking. Pasa el mejor de cada grupo.",
+  },
+];
 
 const categoryOptions = {
   hombre: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
@@ -145,7 +181,21 @@ function App() {
   async function submitEvent(event) {
     event.preventDefault();
     await run(async () => {
-      const payload = { ...eventForm, price: Number(eventForm.price), capacity: Number(eventForm.capacity) };
+      const payload = {
+        ...eventForm,
+        price: Number(eventForm.price),
+        capacity: Number(eventForm.capacity),
+        category_configs: (eventForm.category_configs || [])
+          .filter((config) => config.category.trim())
+          .map((config) => ({
+            ...config,
+            category: config.category.trim(),
+            group_size: Number(config.group_size || 0),
+            guaranteed_matches: Number(config.guaranteed_matches || 0),
+            qualifiers_per_group: Number(config.qualifiers_per_group || 0),
+            notes: config.notes || "",
+          })),
+      };
       if (selectedEventId) {
         const updated = await api.updateEvent(selectedEventId, payload);
         setSelectedEventId(String(updated.id));
@@ -542,6 +592,7 @@ function EventsPage(props) {
       schedule: selectedEvent.schedule || "",
       capacity: selectedEvent.capacity ?? 16,
       tournament_type: selectedEvent.tournament_type || "Americano",
+      category_configs: selectedEvent.category_configs || [],
       description: selectedEvent.description || "",
       is_active: selectedEvent.is_active ?? true,
     });
@@ -729,6 +780,7 @@ function EventsPage(props) {
                   rentalMinutes={Number(fixtureForm.rental_minutes || 120)}
                   startTime={fixtureForm.start_time}
                 />
+                <DynamicFourTaPlan matches={matches} pairs={pairs} eventId={selectedEventId} onChange={run} />
                 <TournamentBracket matches={matches} pairs={pairs} />
               </div>
             </div>
@@ -762,6 +814,20 @@ function EventsPage(props) {
 }
 
 function EventForm({ form, setForm, onSubmit, isEditing }) {
+  function updateCategoryConfig(index, patch) {
+    const configs = [...(form.category_configs || [])];
+    configs[index] = { ...configs[index], ...patch };
+    setForm({ ...form, category_configs: configs });
+  }
+
+  function addCategoryConfig(config = defaultCategoryConfig) {
+    setForm({ ...form, category_configs: [...(form.category_configs || []), { ...config }] });
+  }
+
+  function removeCategoryConfig(index) {
+    setForm({ ...form, category_configs: (form.category_configs || []).filter((_, itemIndex) => itemIndex !== index) });
+  }
+
   return (
     <div className="data-block">
       <h3><CalendarPlus size={16} /> {isEditing ? "Editar evento" : "Crear evento"}</h3>
@@ -774,6 +840,62 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
         <input placeholder="Horario" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} required />
         <input type="number" placeholder="Cupos" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
         <input placeholder="Tipo torneo" value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
+        <div className="category-configs">
+          <div className="block-head">
+            <h3>Modalidad por categoría</h3>
+            <button type="button" className="secondary-action" onClick={() => setForm({ ...form, category_configs: amarTodayCategoryConfigs.map((config) => ({ ...config })) })}>
+              Usar formato AMAR hoy
+            </button>
+          </div>
+          {(form.category_configs || []).length ? (
+            <div className="category-config-list">
+              {form.category_configs.map((config, index) => (
+                <div className="category-config-row" key={`${config.category}-${index}`}>
+                  <input
+                    placeholder="Categoría"
+                    value={config.category}
+                    onChange={(e) => updateCategoryConfig(index, { category: e.target.value })}
+                  />
+                  <select value={config.modality} onChange={(e) => updateCategoryConfig(index, { modality: e.target.value })}>
+                    {modalityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Parejas/grupo"
+                    value={config.group_size}
+                    onChange={(e) => updateCategoryConfig(index, { group_size: e.target.value })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Partidos"
+                    value={config.guaranteed_matches}
+                    onChange={(e) => updateCategoryConfig(index, { guaranteed_matches: e.target.value })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Clasifican"
+                    value={config.qualifiers_per_group}
+                    onChange={(e) => updateCategoryConfig(index, { qualifiers_per_group: e.target.value })}
+                  />
+                  <input
+                    placeholder="Notas"
+                    value={config.notes || ""}
+                    onChange={(e) => updateCategoryConfig(index, { notes: e.target.value })}
+                  />
+                  <button type="button" className="danger-action" onClick={() => removeCategoryConfig(index)}>Quitar</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">Sin modalidades configuradas por categoría.</p>
+          )}
+          <button type="button" className="secondary-action" onClick={() => addCategoryConfig()}>
+            Agregar modalidad
+          </button>
+        </div>
         <textarea placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         <button><CalendarPlus size={16} /> {isEditing ? "Actualizar evento" : "Guardar evento"}</button>
       </form>
@@ -1057,7 +1179,12 @@ function parseFixtureRound(roundName) {
 
 function normalizeCourt(court) {
   if (!court) return "Sin cancha";
-  return String(court).startsWith("Cancha") ? String(court) : `Cancha ${court}`;
+  const value = String(court).trim();
+  if (/^cancha\b/i.test(value)) {
+    const [, number = ""] = value.split(/\s+/, 2);
+    return number ? `Cancha ${number}` : "Cancha";
+  }
+  return `Cancha ${value}`;
 }
 
 function hasResult(match) {
@@ -1086,13 +1213,228 @@ function fixtureCategoryFromPairs(pairOne, pairTwo, fallbackCategory) {
   return fallbackCategory;
 }
 
+function isNumericScore(value) {
+  return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value));
+}
+
+function emptyStanding(pair) {
+  return {
+    pair,
+    played: 0,
+    won: 0,
+    lost: 0,
+    pointsFor: 0,
+    pointsAgainst: 0,
+    points: 0,
+  };
+}
+
+function standingDiff(standing) {
+  return standing.pointsFor - standing.pointsAgainst;
+}
+
+function sortStandings(items) {
+  return [...items].sort((a, b) => (
+    b.points - a.points
+    || b.won - a.won
+    || standingDiff(b) - standingDiff(a)
+    || b.pointsFor - a.pointsFor
+    || (a.pair.seed || 9999) - (b.pair.seed || 9999)
+    || a.pair.id - b.pair.id
+  ));
+}
+
+function resolveMatchResult(match) {
+  if (!match || !isNumericScore(match.pair_one_score) || !isNumericScore(match.pair_two_score)) {
+    return { winnerId: null, loserId: null };
+  }
+  const oneScore = Number(match.pair_one_score);
+  const twoScore = Number(match.pair_two_score);
+  if (oneScore === twoScore) return { winnerId: null, loserId: null };
+  return oneScore > twoScore
+    ? { winnerId: match.pair_one_id, loserId: match.pair_two_id }
+    : { winnerId: match.pair_two_id, loserId: match.pair_one_id };
+}
+
+function DynamicFourTaPlan({ matches, pairs, eventId, onChange }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const groupMatches = matches
+    .map((match) => {
+      const schedule = parseFixtureRound(match.round_name);
+      const pairOne = pairById.get(match.pair_one_id);
+      const pairTwo = pairById.get(match.pair_two_id);
+      const category = fixtureCategoryFromPairs(pairOne, pairTwo, schedule.category);
+      return { match, schedule, pairOne, pairTwo, category };
+    })
+    .filter((row) => row.category === "4ta" && /^Grupo\s+/i.test(row.schedule.group || ""));
+
+  if (!groupMatches.length) return null;
+
+  const groups = groupMatches.reduce((collection, row) => {
+    const groupName = row.schedule.group;
+    if (!collection[groupName]) collection[groupName] = new Map();
+    [row.pairOne, row.pairTwo].filter(Boolean).forEach((pair) => {
+      if (!collection[groupName].has(pair.id)) collection[groupName].set(pair.id, emptyStanding(pair));
+    });
+
+    if (isNumericScore(row.match.pair_one_score) && isNumericScore(row.match.pair_two_score)) {
+      const one = collection[groupName].get(row.match.pair_one_id);
+      const two = collection[groupName].get(row.match.pair_two_id);
+      const oneScore = Number(row.match.pair_one_score);
+      const twoScore = Number(row.match.pair_two_score);
+      one.played += 1;
+      two.played += 1;
+      one.pointsFor += oneScore;
+      one.pointsAgainst += twoScore;
+      two.pointsFor += twoScore;
+      two.pointsAgainst += oneScore;
+      if (oneScore > twoScore) {
+        one.won += 1;
+        two.lost += 1;
+        one.points += 3;
+      } else if (twoScore > oneScore) {
+        two.won += 1;
+        one.lost += 1;
+        two.points += 3;
+      } else {
+        one.points += 1;
+        two.points += 1;
+      }
+    }
+    return collection;
+  }, {});
+
+  const orderedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const groupLeaders = Object.fromEntries(
+    orderedGroupNames.map((groupName) => [groupName, sortStandings([...groups[groupName].values()])[0] || null]),
+  );
+  const groupRows = orderedGroupNames.map((groupName) => ({
+    groupName,
+    standings: sortStandings([...groups[groupName].values()]),
+    leader: groupLeaders[groupName],
+  }));
+
+  const semiOne = {
+    court: "Cancha 1",
+    time: "22:15",
+    label: "Semifinal 1",
+    one: groupLeaders["Grupo A"]?.pair,
+    two: groupLeaders["Grupo D"]?.pair,
+  };
+  const semiTwo = {
+    court: "Cancha 3",
+    time: "22:15",
+    label: "Semifinal 2",
+    one: groupLeaders["Grupo B"]?.pair,
+    two: groupLeaders["Grupo C"]?.pair,
+  };
+  const existingSemiOne = matches.find((match) => /4ta/i.test(match.round_name || "") && /Semifinal 1/i.test(match.round_name || ""));
+  const existingSemiTwo = matches.find((match) => /4ta/i.test(match.round_name || "") && /Semifinal 2/i.test(match.round_name || ""));
+  const existingFinal = matches.find((match) => /4ta/i.test(match.round_name || "") && /\bTorneo - Final\b/i.test(match.round_name || ""));
+  const existingThirdPlace = matches.find((match) => /4ta/i.test(match.round_name || "") && /3er lugar/i.test(match.round_name || ""));
+  const semiOneResult = resolveMatchResult(existingSemiOne);
+  const semiTwoResult = resolveMatchResult(existingSemiTwo);
+  const finalPairs = [semiOneResult.winnerId, semiTwoResult.winnerId].map((id) => pairById.get(id)).filter(Boolean);
+  const thirdPlacePairs = [semiOneResult.loserId, semiTwoResult.loserId].map((id) => pairById.get(id)).filter(Boolean);
+  const canCreateSemis = eventId && semiOne.one && semiOne.two && semiTwo.one && semiTwo.two && (!existingSemiOne || !existingSemiTwo);
+  const canCreateFinals = eventId && finalPairs.length === 2 && thirdPlacePairs.length === 2 && (!existingFinal || !existingThirdPlace);
+
+  function createSemifinals() {
+    return onChange(() => Promise.all([
+      !existingSemiOne && api.createMatch(eventId, {
+        pair_one_id: semiOne.one.id,
+        pair_two_id: semiOne.two.id,
+        round_name: "4ta - Torneo - Semifinal 1 - 22:15",
+        court: "cancha 1",
+      }),
+      !existingSemiTwo && api.createMatch(eventId, {
+        pair_one_id: semiTwo.one.id,
+        pair_two_id: semiTwo.two.id,
+        round_name: "4ta - Torneo - Semifinal 2 - 22:15",
+        court: "cancha 3",
+      }),
+    ].filter(Boolean)));
+  }
+
+  function createFinals() {
+    return onChange(() => Promise.all([
+      !existingFinal && api.createMatch(eventId, {
+        pair_one_id: finalPairs[0].id,
+        pair_two_id: finalPairs[1].id,
+        round_name: "4ta - Torneo - Final - 22:40",
+        court: "cancha 1",
+      }),
+      !existingThirdPlace && api.createMatch(eventId, {
+        pair_one_id: thirdPlacePairs[0].id,
+        pair_two_id: thirdPlacePairs[1].id,
+        round_name: "4ta - Torneo - 3er lugar - 22:40",
+        court: "cancha 3",
+      }),
+    ].filter(Boolean)));
+  }
+
+  return (
+    <article className="data-block dynamic-plan">
+      <div className="block-head">
+        <h3>Clasificación dinámica 4ta</h3>
+        <span>Mejor de cada grupo</span>
+      </div>
+      <div className="qualifier-grid">
+        {groupRows.map(({ groupName, leader, standings }) => (
+          <div className="qualifier-card" key={groupName}>
+            <span>{groupName}</span>
+            <strong>{leader ? pairName(leader.pair) : "Pendiente"}</strong>
+            <small>
+              {leader
+                ? `${leader.points} pts · ${leader.won}G · dif ${standingDiff(leader)}`
+                : "Faltan resultados"}
+            </small>
+            <ol>
+              {standings.slice(0, 4).map((standing) => (
+                <li key={standing.pair.id}>
+                  {pairName(standing.pair)} <b>{standing.points}</b>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </div>
+
+      <div className="dynamic-court-plan">
+        {[semiOne, semiTwo].map((item) => (
+          <div className="dynamic-court-card" key={item.label}>
+            <span>{item.time} · {item.court}</span>
+            <strong>{item.label}</strong>
+            <p>{item.one ? pairName(item.one) : "Ganador Grupo"} vs {item.two ? pairName(item.two) : "Ganador Grupo"}</p>
+          </div>
+        ))}
+        <div className="dynamic-court-card">
+          <span>22:40 · Cancha 1</span>
+          <strong>Final 4ta</strong>
+          <p>{finalPairs.length === 2 ? `${pairName(finalPairs[0])} vs ${pairName(finalPairs[1])}` : "Se define con los ganadores de semifinal"}</p>
+        </div>
+        <div className="dynamic-court-card">
+          <span>22:40 · Cancha 3</span>
+          <strong>3er lugar 4ta</strong>
+          <p>{thirdPlacePairs.length === 2 ? `${pairName(thirdPlacePairs[0])} vs ${pairName(thirdPlacePairs[1])}` : "Se define con los perdedores de semifinal"}</p>
+        </div>
+      </div>
+      <div className="dynamic-actions">
+        <button type="button" className="secondary-action" disabled={!canCreateSemis} onClick={createSemifinals}>
+          Crear semifinales 22:15
+        </button>
+        <button type="button" className="secondary-action" disabled={!canCreateFinals} onClick={createFinals}>
+          Crear final y 3er lugar 22:40
+        </button>
+      </div>
+      <p className="muted">Desempate actual: puntos, partidos ganados, diferencia, juegos a favor y seed de inscripción.</p>
+    </article>
+  );
+}
+
 function FixturePreview({ matches, pairs, configuredCourts, resultForm, setResultForm, eventId, onChange, rentalMinutes, startTime }) {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [turnFilter, setTurnFilter] = useState("all");
-  const configuredCourtNames = (configuredCourts || "")
-    .split(",")
-    .map((court) => court.trim())
-    .filter(Boolean);
 
   const scheduledRows = matches
     .map((match) => {
@@ -1122,10 +1464,8 @@ function FixturePreview({ matches, pairs, configuredCourts, resultForm, setResul
   const categories = [...new Set(scheduledRows.map((row) => row.category))];
   const turns = [...new Set(scheduledRows.map((row) => row.turn))];
   const timeSlots = [...new Set(scheduledRows.map((row) => row.time || row.turn))];
-  const courtNames = [...new Set([
-    ...configuredCourtNames,
-    ...scheduledRows.map((row) => row.court).filter(Boolean),
-  ])].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  const courtNames = [...new Set(scheduledRows.map((row) => row.court).filter(Boolean))]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
   const visibleRows = scheduledRows.filter((row) =>
     (categoryFilter === "all" || row.category === categoryFilter)
     && (turnFilter === "all" || row.turn === turnFilter),

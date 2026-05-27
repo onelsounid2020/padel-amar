@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Integer, String, Text
+from sqlalchemy import Date, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -18,6 +18,7 @@ class Event(Base):
     schedule: Mapped[str] = mapped_column(String(120), nullable=False)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     tournament_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    category_configs: Mapped[list[dict]] = mapped_column(JSON, default=list)
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

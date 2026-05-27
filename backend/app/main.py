@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 
 from app.config import settings
 from app.database import Base, engine
@@ -7,6 +8,20 @@ from app.models import Event, EventPair, Match, Payment, Player, Standing
 from app.routers import events, matches, pairs, payments, players, standings
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_local_schema() -> None:
+    inspector = inspect(engine)
+    if "events" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("events")}
+    if "category_configs" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE events ADD COLUMN category_configs JSON DEFAULT '[]'"))
+
+
+ensure_local_schema()
 
 app = FastAPI(title="Padel Manager API", version="0.1.0")
 

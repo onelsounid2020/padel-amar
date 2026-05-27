@@ -293,6 +293,121 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.category-configs {
+  background: #f4fbfe;
+  border: 1px solid #d7e7ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  padding: 12px;
+}
+
+.category-config-list {
+  display: grid;
+  gap: 8px;
+}
+
+.category-config-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(100px, 0.8fr) minmax(180px, 1.5fr) repeat(3, minmax(82px, 0.7fr)) minmax(120px, 1fr) auto;
+}
+
+.category-config-row button,
+.category-configs > button,
+.category-configs .block-head button {
+  grid-column: auto;
+}
+
+.danger-action {
+  background: #fff0e7;
+  border: 1px solid #e6a17f;
+  box-shadow: none;
+  color: #7a1f10;
+  min-height: 36px;
+}
+
+.danger-action:hover {
+  background: #ffe4d6;
+  box-shadow: none;
+}
+
+.dynamic-plan {
+  display: grid;
+  gap: 14px;
+}
+
+.qualifier-grid,
+.dynamic-court-plan {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.qualifier-card,
+.dynamic-court-card {
+  background: #f7fbf4;
+  border: 1px solid #d7e9cb;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.qualifier-card span,
+.dynamic-court-card span {
+  color: #0e5d8f;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qualifier-card strong,
+.dynamic-court-card strong {
+  color: #08223b;
+}
+
+.qualifier-card small {
+  color: #5b6d67;
+}
+
+.qualifier-card ol {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.qualifier-card li {
+  color: #334d5e;
+  font-size: 0.88rem;
+}
+
+.qualifier-card li b {
+  color: #0a3154;
+}
+
+.dynamic-court-card {
+  background: #edf8ff;
+  border-color: #c5deec;
+}
+
+.dynamic-court-card p {
+  margin-bottom: 0;
+}
+
+.dynamic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dynamic-actions button {
+  width: auto;
+}
+
 .columns {
   display: grid;
   gap: 18px;
@@ -1471,6 +1586,7 @@ h3 {
   .match-row,
   .payment-row,
   .pair-admin-row,
+  .category-config-row,
   .fixture-controls,
   .fixture-overview,
   .fixture-filters,
