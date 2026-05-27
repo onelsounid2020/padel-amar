@@ -512,6 +512,7 @@ def generate_tournament_bracket(
 
 def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
     db.execute(delete(Standing).where(Standing.event_id == event_id))
+    db.flush()
 
     pairs = db.scalars(select(EventPair).where(EventPair.event_id == event_id)).all()
     by_pair = {
