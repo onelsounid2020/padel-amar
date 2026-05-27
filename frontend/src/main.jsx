@@ -145,9 +145,15 @@ function App() {
   async function submitEvent(event) {
     event.preventDefault();
     await run(async () => {
-      const created = await api.createEvent({ ...eventForm, price: Number(eventForm.price), capacity: Number(eventForm.capacity) });
-      setSelectedEventId(String(created.id));
-      setEventForm(emptyEvent);
+      const payload = { ...eventForm, price: Number(eventForm.price), capacity: Number(eventForm.capacity) };
+      if (selectedEventId) {
+        const updated = await api.updateEvent(selectedEventId, payload);
+        setSelectedEventId(String(updated.id));
+      } else {
+        const created = await api.createEvent(payload);
+        setSelectedEventId(String(created.id));
+        setEventForm(emptyEvent);
+      }
     });
   }
 
@@ -525,6 +531,22 @@ function EventsPage(props) {
   const recommendedCourtsWithFinals = estimatedMatchesWithFinals ? Math.ceil(estimatedMatchesWithFinals / slotsPerCourt) : 0;
   const configuredCourts = Number(fixtureForm.court_count || 0);
 
+  useEffect(() => {
+    if (!selectedEvent) return;
+    setEventForm({
+      name: selectedEvent.name || "",
+      date: selectedEvent.date || "",
+      place: selectedEvent.place || "",
+      categories: selectedEvent.categories || "",
+      price: selectedEvent.price ?? 0,
+      schedule: selectedEvent.schedule || "",
+      capacity: selectedEvent.capacity ?? 16,
+      tournament_type: selectedEvent.tournament_type || "Americano",
+      description: selectedEvent.description || "",
+      is_active: selectedEvent.is_active ?? true,
+    });
+  }, [selectedEvent?.id]);
+
   return (
     <section className="workspace">
       <section className="panel main-panel">
@@ -553,7 +575,7 @@ function EventsPage(props) {
 
             {eventTab === "event" && (
               <div className="organization-section">
-                <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} />
+                <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={Boolean(selectedEventId)} />
               </div>
             )}
 
@@ -714,7 +736,7 @@ function EventsPage(props) {
 
             {eventTab === "payments" && (
               <div className="payments-grid">
-                <PaymentBlock payments={payments} pairs={pairs} eventId={selectedEventId} onChange={run} />
+                <PaymentBlock payments={payments} pairs={pairs} players={players} eventId={selectedEventId} onChange={run} />
                 <div className="data-block">
                   <h3><Clipboard size={16} /> WhatsApp</h3>
                   <textarea className="whatsapp" value={whatsapp} readOnly />
@@ -731,7 +753,7 @@ function EventsPage(props) {
         ) : (
           <div className="organization-section">
             <p className="empty">No hay eventos cargados todavía. Crea el primero para comenzar.</p>
-            <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} />
+            <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={false} />
           </div>
         )}
       </section>
@@ -739,10 +761,10 @@ function EventsPage(props) {
   );
 }
 
-function EventForm({ form, setForm, onSubmit }) {
+function EventForm({ form, setForm, onSubmit, isEditing }) {
   return (
     <div className="data-block">
-      <h3><CalendarPlus size={16} /> Crear evento</h3>
+      <h3><CalendarPlus size={16} /> {isEditing ? "Editar evento" : "Crear evento"}</h3>
       <form onSubmit={onSubmit} className="event-form-grid">
         <input placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
         <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
@@ -753,7 +775,7 @@ function EventForm({ form, setForm, onSubmit }) {
         <input type="number" placeholder="Cupos" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
         <input placeholder="Tipo torneo" value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
         <textarea placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <button><CalendarPlus size={16} /> Guardar evento</button>
+        <button><CalendarPlus size={16} /> {isEditing ? "Actualizar evento" : "Guardar evento"}</button>
       </form>
     </div>
   );
@@ -924,13 +946,22 @@ function PairsBlock({ pairs, players, eventId, onChange }) {
   );
 }
 
-function PaymentBlock({ payments, pairs, eventId, onChange }) {
+function paymentPlayerName(payment, pair, players) {
+  if (payment.player?.name) return payment.player.name;
+  const player = players.find((item) => item.id === payment.player_id);
+  if (player) return player.name;
+  if (pair?.player_one_id === payment.player_id) return pair.player_one.name;
+  if (pair?.player_two_id === payment.player_id) return pair.player_two?.name || "Jugador";
+  return "Jugador";
+}
+
+function PaymentBlock({ payments, pairs, players, eventId, onChange }) {
   return (
     <article className="data-block">
       <h3><CreditCard size={16} /> Pagos</h3>
       {payments.map((payment) => {
         const pair = payment.pair || pairs.find((item) => item.id === payment.pair_id);
-        const playerName = payment.player?.name || "Jugador";
+        const playerName = paymentPlayerName(payment, pair, players);
         return (
           <div className="payment-row" key={payment.id}>
             <span>

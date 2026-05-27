@@ -18,6 +18,7 @@ export const api = {
   dashboard: () => request("/events/dashboard"),
   events: () => request("/events"),
   createEvent: (data) => request("/events", { method: "POST", body: JSON.stringify(data) }),
+  updateEvent: (eventId, data) => request(`/events/${eventId}`, { method: "PATCH", body: JSON.stringify(data) }),
   players: () => request("/players"),
   createPlayer: (data) => request("/players", { method: "POST", body: JSON.stringify(data) }),
   pairs: (eventId) => request(`/events/${eventId}/pairs`),
