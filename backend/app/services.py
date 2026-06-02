@@ -564,14 +564,24 @@ def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
             one.points += 1
             two.points += 1
 
-    ordered = sorted(
-        by_pair.values(),
-        key=lambda item: (item.points, item.won, item.points_for - item.points_against, item.points_for),
-        reverse=True,
-    )
-    for index, standing in enumerate(ordered, start=1):
-        standing.position = index
-        db.add(standing)
+    standings_by_category: dict[str, list[Standing]] = {}
+    pair_by_id = {pair.id: pair for pair in pairs}
+    for standing in by_pair.values():
+        pair = pair_by_id.get(standing.pair_id)
+        if pair:
+            standings_by_category.setdefault(pair.category, []).append(standing)
+
+    ordered: list[Standing] = []
+    for category in sorted(standings_by_category):
+        category_standings = sorted(
+            standings_by_category[category],
+            key=lambda item: (item.points, item.won, item.points_for - item.points_against, item.points_for),
+            reverse=True,
+        )
+        for index, standing in enumerate(category_standings, start=1):
+            standing.position = index
+            db.add(standing)
+        ordered.extend(category_standings)
 
     db.commit()
     return ordered

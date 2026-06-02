@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import require_permission
 from app.database import get_db
 from app.models.event import Event
 from app.models.match import Match
 from app.models.payment import PlayerPayment, PaymentStatus
 from app.models.player import EventPair, PairStatus
+from app.models.user import User
 from app.schemas.events import DashboardEvent, EventCreate, EventRead, EventUpdate
 from app.services import format_pair, sync_player_payments
 
@@ -14,7 +16,11 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.post("", response_model=EventRead, status_code=201)
-def create_event(payload: EventCreate, db: Session = Depends(get_db)) -> Event:
+def create_event(
+    payload: EventCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> Event:
     event = Event(**payload.model_dump())
     db.add(event)
     db.commit()
@@ -72,7 +78,12 @@ def get_event(event_id: int, db: Session = Depends(get_db)) -> Event:
 
 
 @router.patch("/{event_id}", response_model=EventRead)
-def update_event(event_id: int, payload: EventUpdate, db: Session = Depends(get_db)) -> Event:
+def update_event(
+    event_id: int,
+    payload: EventUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> Event:
     event = db.get(Event, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
@@ -81,6 +92,19 @@ def update_event(event_id: int, payload: EventUpdate, db: Session = Depends(get_
     db.commit()
     db.refresh(event)
     return event
+
+
+@router.delete("/{event_id}", status_code=204)
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> None:
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    db.delete(event)
+    db.commit()
 
 
 @router.get("/{event_id}/whatsapp")

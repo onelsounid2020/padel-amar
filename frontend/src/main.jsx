@@ -14,7 +14,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { api } from "./api/client";
+import { api, setAuthToken } from "./api/client";
 import "./styles.css";
 
 const emptyEvent = {
@@ -35,11 +35,13 @@ const emptyPlayer = { name: "", phone: "", category: "", preferred_side: "indife
 const emptyPublicRegistration = {
   name: "",
   phone: "",
+  paid: false,
   gender: "hombre",
   category: "1era",
   preferred_side: "indiferente",
   partner_name: "",
   partner_phone: "",
+  partner_paid: false,
   partner_preferred_side: "indiferente",
 };
 const emptyPublicResult = { round_name: "", match_id: "", pair_one_score: "", pair_two_score: "" };
@@ -79,6 +81,24 @@ const amarTodayCategoryConfigs = [
   },
 ];
 
+const fallbackPermissionModules = [
+  { key: "events", label: "Eventos", description: "Crear eventos, editar configuración y organizar parejas." },
+  { key: "register", label: "Registro", description: "Ver formulario público de inscripción a eventos." },
+  { key: "results", label: "Resultados", description: "Consultar o cargar resultados desde la vista pública." },
+  { key: "tablet", label: "Tablet", description: "Usar la mesa de resultados optimizada para cancha." },
+  { key: "users", label: "Usuarios", description: "Crear cuentas y asignar roles a jugadores u operadores." },
+  { key: "profiles", label: "Perfiles", description: "Configurar qué módulos puede ver cada rol." },
+];
+
+const publicPermissions = {
+  events: false,
+  register: true,
+  results: true,
+  tablet: false,
+  users: false,
+  profiles: false,
+};
+
 const categoryOptions = {
   hombre: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
   mujer: ["5taD+", "4taC+", "3raB+", "2daA+"],
@@ -93,6 +113,19 @@ function pairName(pair) {
   return `${pair.player_one.name} / ${second}`;
 }
 
+function pageFromLocation() {
+  if (typeof window === "undefined") return "events";
+  const view = new URLSearchParams(window.location.search).get("view");
+  const path = window.location.pathname;
+  if (path === "/tablet" || view === "tablet") return "tablet";
+  if (path === "/usuarios" || view === "users") return "users";
+  if (path === "/perfiles" || view === "profiles") return "profiles";
+  if (path === "/crear-cuenta" || view === "signup") return "signup";
+  if (path === "/registro" || view === "register") return "register";
+  if (path === "/resultados" || view === "results") return "results";
+  return "events";
+}
+
 function App() {
   const [dashboard, setDashboard] = useState([]);
   const [events, setEvents] = useState([]);
@@ -102,6 +135,7 @@ function App() {
   const [matches, setMatches] = useState([]);
   const [standings, setStandings] = useState([]);
   const [ranking, setRanking] = useState([]);
+  const [users, setUsers] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventForm, setEventForm] = useState(emptyEvent);
   const [playerForm, setPlayerForm] = useState(emptyPlayer);
@@ -120,29 +154,74 @@ function App() {
   const [resultForm, setResultForm] = useState({});
   const [publicForm, setPublicForm] = useState(emptyPublicRegistration);
   const [publicResultForm, setPublicResultForm] = useState(emptyPublicResult);
+  const [registrationSuccess, setRegistrationSuccess] = useState(null);
   const [whatsapp, setWhatsapp] = useState("");
+  const [authUser, setAuthUser] = useState(null);
+  const [currentPermissions, setCurrentPermissions] = useState(publicPermissions);
+  const [permissionModules, setPermissionModules] = useState(fallbackPermissionModules);
+  const [rolePermissions, setRolePermissions] = useState([]);
+  const [loginForm, setLoginForm] = useState({ email: "admin@amarpadel.local", password: "admin123" });
+  const [signupForm, setSignupForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    category: "5ta",
+    preferred_side: "indiferente",
+  });
+  const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "jugador" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState("events");
+  const [page, setPage] = useState(pageFromLocation);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === Number(selectedEventId)),
     [events, selectedEventId],
   );
 
-  async function loadBase() {
-    const [dashboardData, eventsData, playersData] = await Promise.all([api.dashboard(), api.events(), api.players()]);
+  function navigatePage(nextPage) {
+    const paths = {
+      events: "/",
+      register: "/registro",
+      results: "/resultados",
+      tablet: "/tablet",
+      users: "/usuarios",
+      profiles: "/perfiles",
+      signup: "/crear-cuenta",
+    };
+    setPage(nextPage);
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", paths[nextPage] || "/");
+    }
+  }
+
+  async function loadBase(userOverride = authUser, permissionOverride = currentPermissions) {
+    const effectiveUser = userOverride;
+    const effectivePermissions = effectiveUser?.role === "superadmin"
+      ? Object.fromEntries(fallbackPermissionModules.map((module) => [module.key, true]))
+      : permissionOverride;
+    const [dashboardData, eventsData, playersData, userData] = await Promise.all([
+      api.dashboard(),
+      api.events(),
+      effectiveUser && effectivePermissions.events ? api.players() : Promise.resolve([]),
+      effectiveUser && effectivePermissions.users ? api.users() : Promise.resolve([]),
+    ]);
     setDashboard(dashboardData);
     setEvents(eventsData);
     setPlayers(playersData);
+    setUsers(userData);
     if (!selectedEventId && eventsData[0]) setSelectedEventId(String(eventsData[0].id));
   }
 
-  async function loadEventData(eventId = selectedEventId) {
+  async function loadEventData(eventId = selectedEventId, userOverride = authUser, permissionOverride = currentPermissions) {
     if (!eventId) return;
+    const effectiveUser = userOverride;
+    const effectivePermissions = effectiveUser?.role === "superadmin"
+      ? Object.fromEntries(fallbackPermissionModules.map((module) => [module.key, true]))
+      : permissionOverride;
     const [pairData, paymentData, matchData, standingData, rankingData, whatsappData] = await Promise.all([
       api.pairs(eventId),
-      api.payments(eventId),
+      effectiveUser && effectivePermissions.events ? api.payments(eventId) : Promise.resolve([]),
       api.matches(eventId),
       api.standings(eventId),
       api.finalRanking(eventId),
@@ -154,6 +233,32 @@ function App() {
     setStandings(standingData);
     setRanking(rankingData);
     setWhatsapp(whatsappData.text);
+  }
+
+  function canAccess(moduleKey) {
+    if (moduleKey === "signup") return true;
+    if (!authUser) return Boolean(publicPermissions[moduleKey]);
+    if (authUser.role === "superadmin") return true;
+    return Boolean(currentPermissions[moduleKey]);
+  }
+
+  async function loadPermissions(userOverride = authUser) {
+    if (!userOverride) {
+      setCurrentPermissions(publicPermissions);
+      setRolePermissions([]);
+      return publicPermissions;
+    }
+    const permissionData = await api.myPermissions();
+    setCurrentPermissions(permissionData);
+    if (permissionData.profiles || userOverride.role === "superadmin") {
+      const [modulesData, rolePermissionsData] = await Promise.all([
+        api.permissionModules(),
+        api.rolePermissions(),
+      ]);
+      setPermissionModules(modulesData);
+      setRolePermissions(rolePermissionsData);
+    }
+    return permissionData;
   }
 
   async function run(action) {
@@ -175,8 +280,40 @@ function App() {
   }, []);
 
   useEffect(() => {
+    api.me()
+      .then(async (user) => {
+        setAuthUser(user);
+        await loadPermissions(user);
+      })
+      .catch(() => setAuthToken(""));
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+    loadBase().catch((err) => setError(err.message));
+    loadEventData(selectedEventId).catch((err) => setError(err.message));
+    if (authUser.role === "jugador") {
+      setPublicForm((current) => ({
+        ...current,
+        name: current.name || authUser.name,
+        phone: current.phone || authUser.phone || "",
+        category: current.category || authUser.category || "5ta",
+        preferred_side: current.preferred_side || authUser.preferred_side || "indiferente",
+      }));
+    }
+  }, [authUser?.id]);
+
+  useEffect(() => {
     loadEventData(selectedEventId).catch((err) => setError(err.message));
   }, [selectedEventId]);
+
+  useEffect(() => {
+    function handlePopState() {
+      setPage(pageFromLocation());
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   async function submitEvent(event) {
     event.preventDefault();
@@ -262,35 +399,41 @@ function App() {
 
   async function submitPublicRegistration(event) {
     event.preventDefault();
-    await run(async () => {
-      const category = categoryLabel(publicForm.category);
-      const playerOne = await api.createPlayer({
+    setLoading(true);
+    setError("");
+    setRegistrationSuccess(null);
+    try {
+      const eventCategories = [
+        ...new Set([
+          ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
+          ...(selectedEvent?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
+        ]),
+      ];
+      const category = categoryLabel(publicForm.category || eventCategories[0] || "1era");
+      await api.publicRegister(selectedEventId, {
         name: publicForm.name,
         phone: publicForm.phone || null,
+        paid: publicForm.paid,
         category,
         preferred_side: publicForm.preferred_side,
+        partner_name: publicForm.partner_name || null,
+        partner_phone: publicForm.partner_phone || null,
+        partner_paid: publicForm.partner_paid,
+        partner_preferred_side: publicForm.partner_preferred_side,
       });
 
-      let playerTwo = null;
-      if (publicForm.partner_name.trim()) {
-        playerTwo = await api.createPlayer({
-          name: publicForm.partner_name,
-          phone: publicForm.partner_phone || null,
-          category,
-          preferred_side: publicForm.partner_preferred_side,
-        });
-      }
-
-      await api.createPair(selectedEventId, {
-        player_one_id: playerOne.id,
-        player_two_id: playerTwo?.id || null,
-        category,
-        status: playerTwo ? "completa" : "buscando_partner",
+      setRegistrationSuccess({
+        eventName: selectedEvent?.name || "Evento",
+        playerName: publicForm.name,
+        partnerName: publicForm.partner_name,
       });
-
       setPublicForm(emptyPublicRegistration);
-      setPage("events");
-    });
+      await loadBase();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function submitPublicResult(event) {
@@ -304,6 +447,246 @@ function App() {
     });
   }
 
+  async function deleteSelectedEvent() {
+    if (!selectedEventId || !selectedEvent) return;
+    const confirmed = window.confirm(`Eliminar "${selectedEvent.name}"? Se borraran parejas, pagos, partidos, resultados y ranking de este evento.`);
+    if (!confirmed) return;
+    await run(async () => {
+      await api.deleteEvent(selectedEventId);
+      const remainingEvents = await api.events();
+      setSelectedEventId(remainingEvents[0] ? String(remainingEvents[0].id) : "");
+      setEventForm(emptyEvent);
+    });
+  }
+
+  async function submitLogin(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await api.login(loginForm);
+      setAuthToken(response.access_token);
+      setAuthUser(response.user);
+      const permissionData = await loadPermissions(response.user);
+      await loadBase(response.user, permissionData);
+      await loadEventData(selectedEventId, response.user, permissionData);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitSignup(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await api.registerPlayer({
+        ...signupForm,
+        phone: signupForm.phone || null,
+      });
+      setAuthToken(response.access_token);
+      setAuthUser(response.user);
+      await loadPermissions(response.user);
+      setPublicForm({
+        ...emptyPublicRegistration,
+        name: response.user.name,
+        phone: response.user.phone || "",
+        category: response.user.category || signupForm.category,
+        preferred_side: response.user.preferred_side || "indiferente",
+      });
+      navigatePage("register");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function logout() {
+    setAuthToken("");
+    setAuthUser(null);
+    setPlayers([]);
+    setPayments([]);
+    setUsers([]);
+    setCurrentPermissions(publicPermissions);
+    setRolePermissions([]);
+  }
+
+  async function submitUser(event) {
+    event.preventDefault();
+    const normalizedEmail = userForm.email.trim().toLowerCase();
+    const existingUser = users.find((user) => user.email.toLowerCase() === normalizedEmail);
+    if (existingUser) {
+      setError(`Ese email ya existe: ${existingUser.name} figura como ${existingUser.role}.`);
+      return;
+    }
+    await run(async () => {
+      await api.createUser({ ...userForm, email: normalizedEmail });
+      setUserForm({ name: "", email: "", password: "", role: "jugador" });
+    });
+  }
+
+  async function updateUser(userId, payload) {
+    await run(async () => {
+      await api.updateUser(userId, payload);
+    });
+  }
+
+  async function deleteUser(user) {
+    const confirmed = window.confirm(`Eliminar usuario "${user.name}"?`);
+    if (!confirmed) return;
+    await run(async () => {
+      await api.deleteUser(user.id);
+    });
+  }
+
+  async function submitRolePermissions(role, permissions) {
+    await run(async () => {
+      const updated = await api.updateRolePermissions(role, permissions);
+      setRolePermissions((current) => current.map((item) => (item.role === role ? updated : item)));
+      if (authUser?.role === role) {
+        setCurrentPermissions(updated.permissions);
+      }
+    });
+  }
+
+  const pageContent = page === "register" ? (
+    <PublicRegistration
+      events={events}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={setSelectedEventId}
+      selectedEvent={selectedEvent}
+      authUser={authUser}
+      form={publicForm}
+      setForm={setPublicForm}
+      success={registrationSuccess}
+      setSuccess={setRegistrationSuccess}
+      onSubmit={submitPublicRegistration}
+    />
+  ) : page === "signup" ? (
+    <SignupPage
+      form={signupForm}
+      setForm={setSignupForm}
+      onSubmit={submitSignup}
+      loading={loading}
+      goLogin={() => navigatePage("events")}
+    />
+  ) : page === "results" ? (
+    <PublicResults
+      events={events}
+      pairs={pairs}
+      matches={matches}
+      standings={standings}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={setSelectedEventId}
+      selectedEvent={selectedEvent}
+      form={publicResultForm}
+      setForm={setPublicResultForm}
+      onSubmit={submitPublicResult}
+    />
+  ) : page === "tablet" ? (
+    <TabletResults
+      events={events}
+      pairs={pairs}
+      matches={matches}
+      standings={standings}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={setSelectedEventId}
+      selectedEvent={selectedEvent}
+      onSave={run}
+      loading={loading}
+      onRefresh={() => run(loadBase)}
+    />
+  ) : page === "users" ? (
+    canAccess("users") ? (
+      <UsersPage
+        authUser={authUser}
+        users={users}
+        form={userForm}
+        setForm={setUserForm}
+        onSubmit={submitUser}
+        onUpdateUser={updateUser}
+        onDeleteUser={deleteUser}
+      />
+    ) : (
+      <AccessDenied moduleName="Usuarios" />
+    )
+  ) : page === "profiles" ? (
+    canAccess("profiles") ? (
+      <ProfilePermissionsPage
+        modules={permissionModules}
+        rolePermissions={rolePermissions}
+        onSave={submitRolePermissions}
+        loading={loading}
+      />
+    ) : (
+      <AccessDenied moduleName="Perfiles" />
+    )
+  ) : (
+    canAccess("events") ? <EventsPage
+      events={events}
+      players={players}
+      pairs={pairs}
+      payments={payments}
+      matches={matches}
+      standings={standings}
+      ranking={ranking}
+      selectedEvent={selectedEvent}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={setSelectedEventId}
+      eventForm={eventForm}
+      setEventForm={setEventForm}
+      playerForm={playerForm}
+      setPlayerForm={setPlayerForm}
+      pairForm={pairForm}
+      setPairForm={setPairForm}
+      matchForm={matchForm}
+      setMatchForm={setMatchForm}
+      fixtureForm={fixtureForm}
+      setFixtureForm={setFixtureForm}
+      resultForm={resultForm}
+      setResultForm={setResultForm}
+      whatsapp={whatsapp}
+      submitEvent={submitEvent}
+      submitPlayer={submitPlayer}
+      submitPair={submitPair}
+      submitMatch={submitMatch}
+      submitGenerateFixture={submitGenerateFixture}
+      submitGenerateBracket={submitGenerateBracket}
+      deleteSelectedEvent={deleteSelectedEvent}
+      authUser={authUser}
+      run={run}
+    /> : <AccessDenied moduleName="Eventos" />
+  );
+
+  if (page === "tablet") {
+    if (!authUser) {
+      return (
+        <main className="tablet-shell">
+          {error && <div className="alert tablet-alert">{error}</div>}
+          <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} compact />
+        </main>
+      );
+    }
+    return (
+      <main className="tablet-shell">
+        {error && <div className="alert tablet-alert">{error}</div>}
+        {canAccess("tablet") ? pageContent : <AccessDenied moduleName="Tablet" />}
+      </main>
+    );
+  }
+
+  if (!authUser && ["events", "users", "profiles"].includes(page)) {
+    return (
+      <main className="app-shell">
+        {error && <div className="alert">{error}</div>}
+        <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} />
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -313,13 +696,21 @@ function App() {
         </div>
         <div className="top-actions">
           <nav className="app-nav" aria-label="Secciones">
-            <button className={page === "events" ? "active" : ""} onClick={() => setPage("events")}>Eventos</button>
-            <button className={page === "register" ? "active" : ""} onClick={() => setPage("register")}>Registro</button>
-            <button className={page === "results" ? "active" : ""} onClick={() => setPage("results")}>Resultados</button>
+            {canAccess("events") && <button className={page === "events" ? "active" : ""} onClick={() => navigatePage("events")}>Eventos</button>}
+            {canAccess("register") && <button className={page === "register" ? "active" : ""} onClick={() => navigatePage("register")}>Registro</button>}
+            {canAccess("results") && <button className={page === "results" ? "active" : ""} onClick={() => navigatePage("results")}>Resultados</button>}
+            {canAccess("users") && (
+              <button className={page === "users" ? "active" : ""} onClick={() => navigatePage("users")}>Usuarios</button>
+            )}
+            {canAccess("profiles") && (
+              <button className={page === "profiles" ? "active" : ""} onClick={() => navigatePage("profiles")}>Perfiles</button>
+            )}
+            {canAccess("tablet") && <button className={page === "tablet" ? "active" : ""} onClick={() => navigatePage("tablet")}>Tablet</button>}
           </nav>
           <button className="icon-button" onClick={() => run(loadBase)} disabled={loading} title="Actualizar">
             <RefreshCw size={18} />
           </button>
+          {authUser && <button className="secondary-action" type="button" onClick={logout}>Salir</button>}
         </div>
       </header>
 
@@ -336,64 +727,77 @@ function App() {
         ))}
       </section>
 
-      {page === "register" ? (
-        <PublicRegistration
-          events={events}
-          selectedEventId={selectedEventId}
-          setSelectedEventId={setSelectedEventId}
-          selectedEvent={selectedEvent}
-          form={publicForm}
-          setForm={setPublicForm}
-          onSubmit={submitPublicRegistration}
-        />
-      ) : page === "results" ? (
-        <PublicResults
-          events={events}
-          pairs={pairs}
-          matches={matches}
-          standings={standings}
-          selectedEventId={selectedEventId}
-          setSelectedEventId={setSelectedEventId}
-          selectedEvent={selectedEvent}
-          form={publicResultForm}
-          setForm={setPublicResultForm}
-          onSubmit={submitPublicResult}
-        />
-      ) : (
-        <EventsPage
-          events={events}
-          players={players}
-          pairs={pairs}
-          payments={payments}
-          matches={matches}
-          standings={standings}
-          ranking={ranking}
-          selectedEvent={selectedEvent}
-          selectedEventId={selectedEventId}
-          setSelectedEventId={setSelectedEventId}
-          eventForm={eventForm}
-          setEventForm={setEventForm}
-          playerForm={playerForm}
-          setPlayerForm={setPlayerForm}
-          pairForm={pairForm}
-          setPairForm={setPairForm}
-          matchForm={matchForm}
-          setMatchForm={setMatchForm}
-          fixtureForm={fixtureForm}
-          setFixtureForm={setFixtureForm}
-          resultForm={resultForm}
-          setResultForm={setResultForm}
-          whatsapp={whatsapp}
-          submitEvent={submitEvent}
-          submitPlayer={submitPlayer}
-          submitPair={submitPair}
-          submitMatch={submitMatch}
-          submitGenerateFixture={submitGenerateFixture}
-          submitGenerateBracket={submitGenerateBracket}
-          run={run}
-        />
-      )}
+      {pageContent}
     </main>
+  );
+}
+
+function LoginPage({ form, setForm, onSubmit, loading, compact = false }) {
+  return (
+    <section className={compact ? "login-page compact" : "login-page"}>
+      <div className="login-card">
+        <p className="eyebrow">Acceso AmarPadel</p>
+        <h1>{compact ? "Acceso operador" : "Panel administrativo"}</h1>
+        <p>Ingresa con una cuenta autorizada para administrar eventos, pagos, parejas o resultados.</p>
+        <form onSubmit={onSubmit} className="login-form">
+          <label className="form-field">
+            <span>Email</span>
+            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
+          </label>
+          <label className="form-field">
+            <span>Contraseña</span>
+            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+          </label>
+          <button disabled={loading}>Entrar</button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function SignupPage({ form, setForm, onSubmit, loading, goLogin }) {
+  return (
+    <section className="signup-page">
+      <div className="signup-card">
+        <div className="registration-title">
+          <p className="eyebrow">Perfil jugador</p>
+          <h2>Crea tu cuenta</h2>
+          <p>Guarda tus datos para inscribirte más rápido y ver tus estadísticas cuando activemos el perfil.</p>
+        </div>
+        <form onSubmit={onSubmit} className="signup-form">
+          <label className="form-field">
+            <span>Nombre</span>
+            <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Nombre y apellido" required />
+          </label>
+          <label className="form-field">
+            <span>Email</span>
+            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
+          </label>
+          <label className="form-field">
+            <span>Contraseña</span>
+            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+          </label>
+          <label className="form-field">
+            <span>Teléfono</span>
+            <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Opcional" />
+          </label>
+          <label className="form-field">
+            <span>Categoría habitual</span>
+            <CategorySelect value={form.category} onChange={(category) => setForm({ ...form, category })} />
+          </label>
+          <label className="form-field">
+            <span>Lado preferido</span>
+            <select value={form.preferred_side} onChange={(event) => setForm({ ...form, preferred_side: event.target.value })}>
+              <option value="drive">Drive</option>
+              <option value="reves">Revés</option>
+              <option value="indiferente">Indiferente</option>
+            </select>
+          </label>
+          <button disabled={loading}>Crear perfil y continuar</button>
+        </form>
+        <button type="button" className="secondary-action" onClick={goLogin}>Ya tengo cuenta administrativa</button>
+      </div>
+    </section>
   );
 }
 
@@ -533,6 +937,184 @@ function PublicResults({ events, pairs, matches, standings, selectedEventId, set
   );
 }
 
+function TabletResults({ events, pairs, matches, standings, selectedEventId, setSelectedEventId, selectedEvent, onSave, loading, onRefresh }) {
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [turnFilter, setTurnFilter] = useState("next");
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [scores, setScores] = useState({});
+
+  const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
+  const matchRows = useMemo(() => matches
+    .map((match) => {
+      const schedule = parseFixtureRound(match.round_name);
+      const one = pairById.get(match.pair_one_id);
+      const two = pairById.get(match.pair_two_id);
+      const category = fixtureCategoryFromPairs(one, two, schedule.category);
+      return {
+        category,
+        courtLabel: normalizeCourt(match.court),
+        done: hasResult(match),
+        group: schedule.group,
+        match,
+        pairOne: one ? pairName(one) : `Pareja ${match.pair_one_id}`,
+        pairTwo: two ? pairName(two) : `Pareja ${match.pair_two_id}`,
+        time: schedule.time,
+        turn: schedule.turn,
+      };
+    })
+    .sort((a, b) => {
+      const timeCompare = minutesFromSlot(a.time || a.turn) - minutesFromSlot(b.time || b.turn);
+      if (timeCompare !== 0) return timeCompare;
+      return a.courtLabel.localeCompare(b.courtLabel, undefined, { numeric: true });
+    }), [matches, pairById]);
+
+  useEffect(() => {
+    setScores(Object.fromEntries(matches.map((match) => [
+      match.id,
+      {
+        pair_one_score: match.pair_one_score ?? "",
+        pair_two_score: match.pair_two_score ?? "",
+      },
+    ])));
+  }, [matches]);
+
+  const categories = [...new Set(matchRows.map((row) => row.category))];
+  const turns = [...new Set(matchRows.map((row) => row.time || row.turn))];
+  const nextTurn = turns.find((turn) => matchRows.some((row) => (row.time || row.turn) === turn && !row.done)) || turns[0] || "";
+  const activeTurn = turnFilter === "next" ? nextTurn : turnFilter;
+  const completedCount = matchRows.filter((row) => row.done).length;
+  const pendingCount = matchRows.length - completedCount;
+  const standingsByCategory = standings.reduce((groups, standing) => {
+    const category = standing.pair.category || "Sin categoria";
+    groups[category] = [...(groups[category] || []), standing];
+    return groups;
+  }, {});
+
+  const visibleRows = matchRows.filter((row) => (
+    (categoryFilter === "all" || row.category === categoryFilter)
+    && (!activeTurn || (row.time || row.turn) === activeTurn)
+    && (statusFilter === "all" || (statusFilter === "pending" ? !row.done : row.done))
+  ));
+
+  function setScore(matchId, field, value) {
+    const numericValue = Math.max(0, Number(value || 0));
+    setScores((current) => ({
+      ...current,
+      [matchId]: {
+        pair_one_score: current[matchId]?.pair_one_score ?? "",
+        pair_two_score: current[matchId]?.pair_two_score ?? "",
+        [field]: String(numericValue),
+      },
+    }));
+  }
+
+  function bumpScore(matchId, field, amount) {
+    const currentValue = Number(scores[matchId]?.[field] || 0);
+    setScore(matchId, field, currentValue + amount);
+  }
+
+  function saveMatch(matchId) {
+    const current = scores[matchId] || {};
+    return onSave(() => api.registerResult(selectedEventId, matchId, {
+      pair_one_score: Number(current.pair_one_score),
+      pair_two_score: Number(current.pair_two_score),
+    }));
+  }
+
+  return (
+    <section className="tablet-page">
+      <div className="tablet-top">
+        <strong>{selectedEvent ? selectedEvent.name : "Mesa de resultados"}</strong>
+        <span>{completedCount}/{matchRows.length} cargados · {pendingCount} pendientes</span>
+        <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
+          <option value="">Evento</option>
+          {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+        </select>
+        <button type="button" className="tablet-refresh" onClick={onRefresh} disabled={loading} title="Actualizar">
+          <RefreshCw size={18} />
+        </button>
+      </div>
+
+      <div className="tablet-controls">
+        <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+          <option value="all">Todas las categorías</option>
+          {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
+        <select value={turnFilter} onChange={(event) => setTurnFilter(event.target.value)}>
+          <option value="next">Próximo turno</option>
+          {turns.map((turn) => <option key={turn} value={turn}>{turn}</option>)}
+        </select>
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <option value="pending">Pendientes</option>
+          <option value="done">Cargados</option>
+          <option value="all">Todos</option>
+        </select>
+      </div>
+
+      <div className="tablet-match-grid">
+        {visibleRows.length ? visibleRows.map((row) => {
+          const current = scores[row.match.id] || { pair_one_score: "", pair_two_score: "" };
+          const canSave = selectedEventId && current.pair_one_score !== "" && current.pair_two_score !== "";
+          return (
+            <article className={`tablet-match ${row.done ? "done" : ""}`} key={row.match.id}>
+              <div className="tablet-match-head">
+                <span>{row.time || row.turn}</span>
+                <strong>{row.courtLabel}</strong>
+                <em>{row.category}{row.group ? ` · ${row.group}` : ""}</em>
+              </div>
+              <div className="tablet-score-row">
+                <strong>{row.pairOne}</strong>
+                <div className="tablet-score-control">
+                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_one_score", -1)}>-</button>
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={current.pair_one_score}
+                    onChange={(event) => setScore(row.match.id, "pair_one_score", event.target.value)}
+                  />
+                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_one_score", 1)}>+</button>
+                </div>
+              </div>
+              <div className="tablet-versus">vs</div>
+              <div className="tablet-score-row">
+                <strong>{row.pairTwo}</strong>
+                <div className="tablet-score-control">
+                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_two_score", -1)}>-</button>
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={current.pair_two_score}
+                    onChange={(event) => setScore(row.match.id, "pair_two_score", event.target.value)}
+                  />
+                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_two_score", 1)}>+</button>
+                </div>
+              </div>
+              <button className="tablet-save" type="button" disabled={!canSave || loading} onClick={() => saveMatch(row.match.id)}>
+                <Check size={20} /> Guardar
+              </button>
+            </article>
+          );
+        }) : (
+          <div className="tablet-empty">No hay partidos con esos filtros.</div>
+        )}
+      </div>
+
+      <section className="tablet-ranking" aria-label="Ranking resumido">
+        {Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
+          <article key={category}>
+            <strong>{category}</strong>
+            {categoryStandings.slice(0, 5).map((standing) => (
+              <span key={standing.id}>{standing.position}. {pairName(standing.pair)} · {standing.points} pts</span>
+            ))}
+          </article>
+        ))}
+      </section>
+    </section>
+  );
+}
+
 function EventsPage(props) {
   const [eventTab, setEventTab] = useState("organization");
   const {
@@ -565,6 +1147,8 @@ function EventsPage(props) {
     submitMatch,
     submitGenerateFixture,
     submitGenerateBracket,
+    deleteSelectedEvent,
+    authUser,
     run,
   } = props;
   const completePairsCount = pairs.filter((pair) => pair.status === "completa" && pair.player_two_id).length;
@@ -627,6 +1211,15 @@ function EventsPage(props) {
             {eventTab === "event" && (
               <div className="organization-section">
                 <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={Boolean(selectedEventId)} />
+                <div className="danger-zone">
+                  <div>
+                    <strong>Eliminar evento</strong>
+                    <span>Borra parejas, pagos, partidos, resultados y ranking asociados.</span>
+                  </div>
+                  <button type="button" className="danger-action" onClick={deleteSelectedEvent}>
+                    Eliminar evento
+                  </button>
+                </div>
               </div>
             )}
 
@@ -801,6 +1394,7 @@ function EventsPage(props) {
                 <RankingBlock ranking={ranking} standings={standings} />
               </div>
             )}
+
           </>
         ) : (
           <div className="organization-section">
@@ -832,17 +1426,52 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
     <div className="data-block">
       <h3><CalendarPlus size={16} /> {isEditing ? "Editar evento" : "Crear evento"}</h3>
       <form onSubmit={onSubmit} className="event-form-grid">
-        <input placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-        <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
-        <input placeholder="Lugar" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} required />
-        <input placeholder="Categorías del evento" value={form.categories} onChange={(e) => setForm({ ...form, categories: e.target.value })} required />
-        <input type="number" placeholder="Precio" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-        <input placeholder="Horario" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} required />
-        <input type="number" placeholder="Cupos" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
-        <input placeholder="Tipo torneo" value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
+        <label className="form-field">
+          <span>Nombre del evento</span>
+          <input placeholder="Americano AMAR..." value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <small>Nombre visible en la app y mensajes.</small>
+        </label>
+        <label className="form-field">
+          <span>Fecha</span>
+          <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+          <small>Día en que se juega.</small>
+        </label>
+        <label className="form-field">
+          <span>Lugar</span>
+          <input placeholder="Club o sede" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} required />
+          <small>Cancha, club o dirección corta.</small>
+        </label>
+        <label className="form-field">
+          <span>Categorías</span>
+          <input placeholder="4ta / 5ta" value={form.categories} onChange={(e) => setForm({ ...form, categories: e.target.value })} required />
+          <small>Texto resumen de categorías.</small>
+        </label>
+        <label className="form-field">
+          <span>Precio</span>
+          <input type="number" placeholder="13000" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+          <small>Valor por jugador o inscripción, según tu criterio.</small>
+        </label>
+        <label className="form-field">
+          <span>Horario</span>
+          <input placeholder="21:00 a 23:00" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} required />
+          <small>Bloque horario del evento.</small>
+        </label>
+        <label className="form-field">
+          <span>Cupos</span>
+          <input type="number" placeholder="56" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+          <small>Total máximo de jugadores/inscritos.</small>
+        </label>
+        <label className="form-field">
+          <span>Tipo de torneo</span>
+          <input placeholder="Americano, grupos, ranking..." value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
+          <small>Descripción interna del formato general.</small>
+        </label>
         <div className="category-configs">
           <div className="block-head">
-            <h3>Modalidad por categoría</h3>
+            <div>
+              <h3>Modalidad por categoría</h3>
+              <p className="field-help">Define cómo se arma y calcula cada categoría dentro del mismo evento.</p>
+            </div>
             <button type="button" className="secondary-action" onClick={() => setForm({ ...form, category_configs: amarTodayCategoryConfigs.map((config) => ({ ...config })) })}>
               Usar formato AMAR hoy
             </button>
@@ -851,40 +1480,58 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
             <div className="category-config-list">
               {form.category_configs.map((config, index) => (
                 <div className="category-config-row" key={`${config.category}-${index}`}>
-                  <input
-                    placeholder="Categoría"
-                    value={config.category}
-                    onChange={(e) => updateCategoryConfig(index, { category: e.target.value })}
-                  />
-                  <select value={config.modality} onChange={(e) => updateCategoryConfig(index, { modality: e.target.value })}>
-                    {modalityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Parejas/grupo"
-                    value={config.group_size}
-                    onChange={(e) => updateCategoryConfig(index, { group_size: e.target.value })}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="Partidos"
-                    value={config.guaranteed_matches}
-                    onChange={(e) => updateCategoryConfig(index, { guaranteed_matches: e.target.value })}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="Clasifican"
-                    value={config.qualifiers_per_group}
-                    onChange={(e) => updateCategoryConfig(index, { qualifiers_per_group: e.target.value })}
-                  />
-                  <input
-                    placeholder="Notas"
-                    value={config.notes || ""}
-                    onChange={(e) => updateCategoryConfig(index, { notes: e.target.value })}
-                  />
+                  <label className="form-field compact">
+                    <span>Categoría</span>
+                    <input
+                      placeholder="5ta"
+                      value={config.category}
+                      onChange={(e) => updateCategoryConfig(index, { category: e.target.value })}
+                    />
+                  </label>
+                  <label className="form-field compact">
+                    <span>Modalidad</span>
+                    <select value={config.modality} onChange={(e) => updateCategoryConfig(index, { modality: e.target.value })}>
+                      {modalityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="form-field compact">
+                    <span>Parejas/grupo</span>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="6"
+                      value={config.group_size}
+                      onChange={(e) => updateCategoryConfig(index, { group_size: e.target.value })}
+                    />
+                  </label>
+                  <label className="form-field compact">
+                    <span>Partidos garantizados</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="5"
+                      value={config.guaranteed_matches}
+                      onChange={(e) => updateCategoryConfig(index, { guaranteed_matches: e.target.value })}
+                    />
+                  </label>
+                  <label className="form-field compact">
+                    <span>Clasifican/grupo</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="1"
+                      value={config.qualifiers_per_group}
+                      onChange={(e) => updateCategoryConfig(index, { qualifiers_per_group: e.target.value })}
+                    />
+                  </label>
+                  <label className="form-field compact">
+                    <span>Notas</span>
+                    <input
+                      placeholder="Regla o comentario"
+                      value={config.notes || ""}
+                      onChange={(e) => updateCategoryConfig(index, { notes: e.target.value })}
+                    />
+                  </label>
                   <button type="button" className="danger-action" onClick={() => removeCategoryConfig(index)}>Quitar</button>
                 </div>
               ))}
@@ -896,70 +1543,512 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
             Agregar modalidad
           </button>
         </div>
-        <textarea placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <label className="form-field wide-field">
+          <span>Descripción</span>
+          <textarea placeholder="Notas internas, origen de datos o instrucciones del evento" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <small>Texto libre para recordar detalles del evento.</small>
+        </label>
         <button><CalendarPlus size={16} /> {isEditing ? "Actualizar evento" : "Guardar evento"}</button>
       </form>
     </div>
   );
 }
 
-function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, form, setForm, onSubmit }) {
-  const options = categoryOptions[form.gender];
+function AccessDenied({ moduleName }) {
+  return (
+    <section className="users-page">
+      <div className="public-hero users-hero">
+        <p className="eyebrow">Permisos</p>
+        <h2>Sin acceso a {moduleName}</h2>
+        <p>Tu perfil no tiene este módulo habilitado. Un superadmin puede activarlo desde Perfiles.</p>
+      </div>
+    </section>
+  );
+}
+
+function ProfilePermissionsPage({ modules, rolePermissions, onSave, loading }) {
+  const roleLabels = {
+    jugador: "Jugador",
+    operador: "Operador resultados",
+    admin: "Administrador",
+    superadmin: "Superadmin",
+  };
+  const roleDescriptions = {
+    jugador: "Persona que se inscribe, consulta resultados y en el futuro verá estadísticas propias.",
+    operador: "Persona de cancha o mesa que carga resultados durante el evento.",
+    admin: "Equipo de operación que administra eventos, jugadores, pagos y parejas.",
+    superadmin: "Cuenta dueña del sistema. Siempre conserva todos los permisos.",
+  };
+
+  return (
+    <section className="profiles-page">
+      <div className="public-hero users-hero">
+        <p className="eyebrow">Perfiles</p>
+        <h2>Permisos por rol</h2>
+        <p>Define qué módulos aparecen y qué acciones puede ejecutar cada tipo de cuenta.</p>
+      </div>
+
+      <div className="profile-matrix">
+        {rolePermissions.map((roleConfig) => (
+          <ProfilePermissionCard
+            key={roleConfig.role}
+            config={roleConfig}
+            modules={modules}
+            roleLabel={roleLabels[roleConfig.role] || roleConfig.role}
+            description={roleDescriptions[roleConfig.role]}
+            onSave={onSave}
+            loading={loading}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProfilePermissionCard({ config, modules, roleLabel, description, onSave, loading }) {
+  const [draft, setDraft] = useState(config.permissions);
+  const isSuperadmin = config.role === "superadmin";
+
+  useEffect(() => {
+    setDraft(config.permissions);
+  }, [config.role, config.permissions]);
+
+  function toggle(moduleKey) {
+    if (isSuperadmin) return;
+    setDraft((current) => ({ ...current, [moduleKey]: !current[moduleKey] }));
+  }
+
+  return (
+    <article className="profile-card">
+      <div className="block-head">
+        <div>
+          <h3><Users size={16} /> {roleLabel}</h3>
+          <p>{description}</p>
+        </div>
+        <button type="button" onClick={() => onSave(config.role, draft)} disabled={loading || isSuperadmin}>
+          Guardar
+        </button>
+      </div>
+      <div className="permission-list">
+        {modules.map((module) => (
+          <label className="permission-toggle" key={module.key}>
+            <input
+              type="checkbox"
+              checked={Boolean(draft[module.key])}
+              disabled={isSuperadmin}
+              onChange={() => toggle(module.key)}
+            />
+            <span>
+              <strong>{module.label}</strong>
+              <small>{module.description}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function UsersPage({ authUser, users, form, setForm, onSubmit, onUpdateUser, onDeleteUser }) {
+  const canManageUsers = Boolean(authUser);
+
+  if (!canManageUsers) {
+    return (
+      <section className="users-page">
+        <div className="public-hero users-hero">
+          <p className="eyebrow">Usuarios</p>
+          <h2>Sin permisos de administración</h2>
+          <p>Esta sección queda reservada para administradores y superadministradores.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="users-page">
+      <div className="public-hero users-hero">
+        <p className="eyebrow">Directorio AmarPadel</p>
+        <h2>Usuarios y permisos</h2>
+        <p>Administra perfiles de jugadores, operadores de resultados y cuentas administrativas.</p>
+      </div>
+      <UsersBlock
+        authUser={authUser}
+        users={users}
+        form={form}
+        setForm={setForm}
+        onSubmit={onSubmit}
+        onUpdateUser={onUpdateUser}
+        onDeleteUser={onDeleteUser}
+      />
+    </section>
+  );
+}
+
+function UsersBlock({ authUser, users, form, setForm, onSubmit, onUpdateUser, onDeleteUser }) {
+  const [query, setQuery] = useState("");
+  const roleLabels = {
+    jugador: "Jugador",
+    operador: "Operador resultados",
+    admin: "Administrador",
+    superadmin: "Superadmin",
+  };
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleUsers = normalizedQuery
+    ? users.filter((user) => (
+      user.name.toLowerCase().includes(normalizedQuery)
+      || user.email.toLowerCase().includes(normalizedQuery)
+      || user.role.toLowerCase().includes(normalizedQuery)
+      || (user.category || "").toLowerCase().includes(normalizedQuery)
+    ))
+    : users;
+
+  return (
+    <div className="data-block users-block">
+      <div className="block-head">
+        <h3><Users size={16} /> Usuarios y permisos</h3>
+        <span>{users.length} cuenta{users.length === 1 ? "" : "s"}</span>
+      </div>
+      <div className="users-toolbar">
+        <input
+          type="search"
+          placeholder="Buscar por nombre, email, rol o categoría"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <span>{visibleUsers.length} visibles</span>
+      </div>
+      <form onSubmit={onSubmit} className="user-form-grid">
+        <label className="form-field">
+          <span>Nombre</span>
+          <input placeholder="Nombre y apellido" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
+        </label>
+        <label className="form-field">
+          <span>Email</span>
+          <input type="email" placeholder="correo@dominio.com" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
+        </label>
+        <label className="form-field">
+          <span>Contraseña</span>
+          <input type="password" placeholder="Clave inicial" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+        </label>
+        <label className="form-field">
+          <span>Rol</span>
+          <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
+            {Object.entries(roleLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+          </select>
+        </label>
+        <button>Crear usuario</button>
+      </form>
+      <div className="users-list">
+        {visibleUsers.length ? visibleUsers.map((user) => (
+          <UserAdminRow
+            key={user.id}
+            user={user}
+            authUser={authUser}
+            roleLabels={roleLabels}
+            onUpdateUser={onUpdateUser}
+            onDeleteUser={onDeleteUser}
+          />
+        )) : (
+          <p className="empty">No hay usuarios con ese filtro.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    name: user.name,
+    email: user.email,
+    phone: user.phone || "",
+    category: user.category || "5ta",
+    preferred_side: user.preferred_side || "indiferente",
+    role: user.role,
+    password: "",
+  });
+  const isSelf = authUser?.id === user.id;
+
+  useEffect(() => {
+    setDraft({
+      name: user.name,
+      email: user.email,
+      phone: user.phone || "",
+      category: user.category || "5ta",
+      preferred_side: user.preferred_side || "indiferente",
+      role: user.role,
+      password: "",
+    });
+  }, [user.id, user.name, user.email, user.phone, user.category, user.preferred_side, user.role]);
+
+  async function save() {
+    const payload = {
+      name: draft.name,
+      email: draft.email,
+      phone: draft.phone || null,
+      category: draft.category || null,
+      preferred_side: draft.preferred_side,
+      role: draft.role,
+    };
+    if (draft.password.trim()) payload.password = draft.password;
+    await onUpdateUser(user.id, payload);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="user-edit-row">
+        <label className="form-field compact">
+          <span>Nombre</span>
+          <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required />
+        </label>
+        <label className="form-field compact">
+          <span>Email</span>
+          <input type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} required />
+        </label>
+        <label className="form-field compact">
+          <span>Teléfono</span>
+          <input value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} placeholder="Opcional" />
+        </label>
+        <label className="form-field compact">
+          <span>Categoría</span>
+          <CategorySelect value={draft.category} onChange={(category) => setDraft({ ...draft, category })} />
+        </label>
+        <label className="form-field compact">
+          <span>Lado</span>
+          <select value={draft.preferred_side} onChange={(event) => setDraft({ ...draft, preferred_side: event.target.value })}>
+            <option value="drive">Drive</option>
+            <option value="reves">Revés</option>
+            <option value="indiferente">Indiferente</option>
+          </select>
+        </label>
+        <label className="form-field compact">
+          <span>Rol</span>
+          <select value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value })}>
+            {Object.entries(roleLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+          </select>
+        </label>
+        <label className="form-field compact">
+          <span>Nueva clave</span>
+          <input type="password" value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} placeholder="Dejar igual" />
+        </label>
+        <div className="user-row-actions">
+          <button type="button" onClick={save}>Guardar</button>
+          <button type="button" className="secondary-action" onClick={() => setEditing(false)}>Cancelar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="user-row">
+      <div>
+        <strong>{user.name}</strong>
+        <small>{user.category || "Sin categoría"} · {user.preferred_side || "lado indiferente"}{user.phone ? ` · ${user.phone}` : ""}</small>
+      </div>
+      <span>{user.email}</span>
+      <em>{roleLabels[user.role] || user.role}</em>
+      <div className="user-row-actions">
+        <button type="button" className="secondary-action" onClick={() => setEditing(true)}>Editar</button>
+        <button type="button" className="danger-action" onClick={() => onDeleteUser(user)} disabled={isSelf}>Eliminar</button>
+      </div>
+    </div>
+  );
+}
+
+function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, form, setForm, success, setSuccess, onSubmit }) {
+  const [partnerMode, setPartnerMode] = useState("searching");
+  const eventCategories = [
+    ...new Set([
+      ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
+      ...(selectedEvent?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
+    ]),
+  ];
+  const options = eventCategories.length ? eventCategories : categoryOptions[form.gender];
+  const hasPartner = partnerMode === "complete";
+  const selectedCategory = form.category || options[0] || "";
 
   return (
     <section className="public-page">
-      <div className="public-hero">
-        <p className="eyebrow">Registro jugadores</p>
-        <h2>Inscripción con o sin partner</h2>
-        <p>Los jugadores completan sus datos, eligen categoría y quedan inscritos como pareja completa o buscando partner.</p>
-      </div>
+      <div className="registration-shell">
+        <section className="registration-stage">
+          <div className="registration-title">
+            <p className="eyebrow">Registro jugadores</p>
+            <h2>Inscripción al evento</h2>
+            <p>Elige dónde jugar, completa tus datos y confirma si vienes con partner.</p>
+          </div>
+          <div className="profile-callout">
+            {authUser?.role === "jugador" ? (
+              <>
+                <strong>Inscribiendo como {authUser.name}</strong>
+                <span>Tus datos se cargaron desde tu perfil.</span>
+              </>
+            ) : (
+              <>
+                <strong>¿Juegas seguido?</strong>
+                <span>Crea tu perfil para no llenar tus datos cada vez.</span>
+                <button type="button" className="secondary-action" onClick={() => { window.location.href = "/crear-cuenta"; }}>
+                  Crear perfil jugador
+                </button>
+              </>
+            )}
+          </div>
 
-      <div className="public-grid">
-        <aside className="panel">
-          <h2><ExternalLink size={18} /> Evento disponible</h2>
-          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)} required>
-            <option value="">Seleccionar evento</option>
-            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
-          </select>
-          {selectedEvent && (
-            <div className="event-ticket">
-              <strong>{selectedEvent.name}</strong>
-              <span>{selectedEvent.date}</span>
-              <span>{selectedEvent.place}</span>
-              <span>{selectedEvent.schedule}</span>
+          <div className="registration-steps" aria-label="Pasos de inscripción">
+            <span className={selectedEventId ? "done" : "active"}>1. Evento</span>
+            <span className={form.name ? "done" : selectedEventId ? "active" : ""}>2. Datos</span>
+            <span className={form.name && selectedEventId ? "active" : ""}>3. Confirmar</span>
+          </div>
+
+          <div className="registration-event-cards">
+            {events.map((event) => {
+              const isSelected = String(event.id) === String(selectedEventId);
+              return (
+                <button
+                  type="button"
+                  className={`registration-event-card ${isSelected ? "active" : ""}`}
+                  key={event.id}
+                  onClick={() => {
+                    setSelectedEventId(String(event.id));
+                    setForm({ ...form, category: "" });
+                  }}
+                >
+                  <strong>{event.name}</strong>
+                  <span>{event.date} · {event.schedule}</span>
+                  <span>{event.place}</span>
+                  <em>{event.categories}</em>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="panel registration-panel">
+          {success && (
+            <div className="registration-success">
+              <strong>Inscripción registrada</strong>
+              <span>
+                {success.playerName}
+                {success.partnerName ? ` y ${success.partnerName}` : ""} quedaron inscritos en {success.eventName}.
+              </span>
+              <button type="button" className="secondary-action" onClick={() => setSuccess(null)}>Inscribir otra persona</button>
             </div>
           )}
-        </aside>
-
-        <section className="panel">
-          <h2><UserPlus size={18} /> Formulario de inscripción</h2>
+          <div className="block-head">
+            <h2><UserPlus size={18} /> Datos de inscripción</h2>
+            <span className={`registration-status ${hasPartner ? "complete" : "searching"}`}>
+              {hasPartner ? "Pareja completa" : "Buscando partner"}
+            </span>
+          </div>
           <form onSubmit={onSubmit} className="registration-form">
-            <input placeholder="Nombre jugador" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            <input placeholder="Teléfono opcional" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            <div className="segmented">
-              <button type="button" className={form.gender === "hombre" ? "active" : ""} onClick={() => setForm({ ...form, gender: "hombre", category: "1era" })}>Hombre</button>
-              <button type="button" className={form.gender === "mujer" ? "active" : ""} onClick={() => setForm({ ...form, gender: "mujer", category: "5taD+" })}>Mujer</button>
-            </div>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-              {options.map((category) => <option key={category} value={category}>{category}</option>)}
-            </select>
-            <select value={form.preferred_side} onChange={(e) => setForm({ ...form, preferred_side: e.target.value })}>
-              <option value="drive">Drive</option>
-              <option value="reves">Revés</option>
-              <option value="indiferente">Indiferente</option>
-            </select>
+            <label className="form-field">
+              <span>Nombre jugador</span>
+              <input placeholder="Nombre y apellido" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </label>
+            <label className="form-field">
+              <span>Teléfono</span>
+              <input placeholder="Opcional" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </label>
+            <label className="form-field">
+              <span>Categoría</span>
+              <select value={selectedCategory} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {options.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Lado preferido</span>
+              <select value={form.preferred_side} onChange={(e) => setForm({ ...form, preferred_side: e.target.value })}>
+                <option value="drive">Drive</option>
+                <option value="reves">Revés</option>
+                <option value="indiferente">Indiferente</option>
+              </select>
+            </label>
 
-            <div className="form-divider">Partner opcional</div>
-            <input placeholder="Nombre partner" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} />
-            <input placeholder="Teléfono partner opcional" value={form.partner_phone} onChange={(e) => setForm({ ...form, partner_phone: e.target.value })} />
-            <select value={form.partner_preferred_side} onChange={(e) => setForm({ ...form, partner_preferred_side: e.target.value })}>
-              <option value="drive">Drive</option>
-              <option value="reves">Revés</option>
-              <option value="indiferente">Indiferente</option>
-            </select>
-            <button disabled={!selectedEventId}><UserPlus size={16} /> Inscribirme</button>
+            <div className="form-divider">Partner</div>
+            <div className="registration-choice">
+              <button
+                type="button"
+                className={!hasPartner ? "active" : ""}
+                onClick={() => {
+                  setPartnerMode("searching");
+                  setForm({ ...form, partner_name: "", partner_phone: "", partner_paid: false });
+                }}
+              >
+                Busco partner
+              </button>
+              <button type="button" className={hasPartner ? "active" : ""} onClick={() => setPartnerMode("complete")}>
+                Vengo con partner
+              </button>
+            </div>
+
+            {hasPartner && (
+              <>
+                <label className="form-field">
+                  <span>Nombre partner</span>
+                  <input placeholder="Nombre y apellido" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} />
+                </label>
+                <label className="form-field">
+                  <span>Teléfono partner</span>
+                  <input placeholder="Opcional" value={form.partner_phone} onChange={(e) => setForm({ ...form, partner_phone: e.target.value })} />
+                </label>
+                <label className="form-field">
+                  <span>Lado partner</span>
+                  <select value={form.partner_preferred_side} onChange={(e) => setForm({ ...form, partner_preferred_side: e.target.value })}>
+                    <option value="drive">Drive</option>
+                    <option value="reves">Revés</option>
+                    <option value="indiferente">Indiferente</option>
+                  </select>
+                </label>
+              </>
+            )}
+            <div className="form-divider">Pago</div>
+            <label className="payment-toggle">
+              <input
+                type="checkbox"
+                checked={form.paid}
+                onChange={(e) => setForm({ ...form, paid: e.target.checked })}
+              />
+              <span>
+                <strong>Jugador pagó inscripción</strong>
+                <small>Se marcará como pagado en pagos del evento.</small>
+              </span>
+            </label>
+            {hasPartner && (
+              <label className="payment-toggle">
+                <input
+                  type="checkbox"
+                  checked={form.partner_paid}
+                  onChange={(e) => setForm({ ...form, partner_paid: e.target.checked })}
+                />
+                <span>
+                  <strong>Partner pagó inscripción</strong>
+                  <small>Se marcará como pagado junto con la pareja.</small>
+                </span>
+              </label>
+            )}
+            <button disabled={!selectedEventId || !form.name.trim() || (hasPartner && !form.partner_name.trim())}>
+              <UserPlus size={16} /> Confirmar inscripción
+            </button>
           </form>
         </section>
+
+        <aside className="registration-summary">
+          <div>
+            <span>Evento</span>
+            <strong>{selectedEvent?.name || "Selecciona un evento"}</strong>
+            {selectedEvent && <small>{selectedEvent.date} · {selectedEvent.schedule}</small>}
+          </div>
+          <div>
+            <span>Jugador</span>
+            <strong>{form.name || "Pendiente"}</strong>
+            <small>{selectedCategory || "Sin categoría"} · {form.paid ? "Pagado" : "Pago pendiente"}</small>
+          </div>
+          <div>
+            <span>Partner</span>
+            <strong>{hasPartner ? (form.partner_name || "Pendiente") : "Buscando partner"}</strong>
+            <small>{hasPartner ? (form.partner_paid ? "Pareja completa · pagado" : "Pareja completa · pago pendiente") : "Te anotamos individualmente"}</small>
+          </div>
+        </aside>
       </div>
     </section>
   );
@@ -1055,6 +2144,16 @@ function PairsBlock({ pairs, players, eventId, onChange }) {
                       <option value="buscando_partner">Buscando partner</option>
                       <option value="lista_espera">Lista de espera</option>
                     </select>
+                    <button
+                      className="danger-action"
+                      type="button"
+                      onClick={() => {
+                        const confirmed = window.confirm(`Eliminar ${pairName(pair)} del evento? Tambien se borraran sus partidos y resultados asociados.`);
+                        if (confirmed) onChange(() => api.deletePair(eventId, pair.id));
+                      }}
+                    >
+                      Eliminar
+                    </button>
                   </div>
                 ))}
               </section>

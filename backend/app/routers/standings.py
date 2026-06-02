@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import require_permission
 from app.database import get_db
 from app.models.player import EventPair
 from app.models.standing import Standing
+from app.models.user import User
 from app.schemas.standings import StandingRead
 from app.services import recalculate_standings
 
@@ -12,7 +14,11 @@ router = APIRouter(prefix="/events/{event_id}/standings", tags=["standings"])
 
 
 @router.post("/recalculate", response_model=list[StandingRead])
-def recalculate(event_id: int, db: Session = Depends(get_db)) -> list[Standing]:
+def recalculate(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> list[Standing]:
     recalculate_standings(db, event_id)
     return _standings(db, event_id)
 
@@ -44,6 +50,7 @@ def _standings(db: Session, event_id: int) -> list[Standing]:
                 selectinload(Standing.pair).selectinload(EventPair.player_one),
                 selectinload(Standing.pair).selectinload(EventPair.player_two),
             )
-            .order_by(Standing.position)
+            .join(EventPair, EventPair.id == Standing.pair_id)
+            .order_by(EventPair.category, Standing.position)
         )
     )

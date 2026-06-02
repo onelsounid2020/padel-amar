@@ -3,36 +3,50 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
+from app.auth import ensure_default_admin
 from app.models import Event, EventPair, Match, Payment, Player, Standing
-from app.routers import events, matches, pairs, payments, players, standings
+from app.routers import auth, events, matches, pairs, payments, players, public, standings
 
 Base.metadata.create_all(bind=engine)
 
 
 def ensure_local_schema() -> None:
     inspector = inspect(engine)
-    if "events" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "events" not in table_names:
         return
     columns = {column["name"] for column in inspector.get_columns("events")}
-    if "category_configs" in columns:
-        return
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE events ADD COLUMN category_configs JSON DEFAULT '[]'"))
+        if "category_configs" not in columns:
+            connection.execute(text("ALTER TABLE events ADD COLUMN category_configs JSON DEFAULT '[]'"))
+        if "users" in table_names:
+            user_columns = {column["name"] for column in inspector.get_columns("users")}
+            if "phone" not in user_columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(40)"))
+            if "category" not in user_columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN category VARCHAR(80)"))
+            if "preferred_side" not in user_columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN preferred_side VARCHAR(11)"))
 
 
 ensure_local_schema()
+with SessionLocal() as db:
+    ensure_default_admin(db)
 
 app = FastAPI(title="Padel Manager API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url, "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):5173$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
+app.include_router(public.router)
 app.include_router(events.router)
 app.include_router(players.router)
 app.include_router(pairs.router)

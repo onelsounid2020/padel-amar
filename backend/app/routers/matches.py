@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import require_permission
 from app.database import get_db
 from app.models.match import Match
+from app.models.user import User
 from app.schemas.matches import MatchCreate, MatchRead, MatchResultUpdate
 from app.services import generate_fixture, generate_group_fixture, generate_tournament_bracket, recalculate_standings
 
@@ -11,7 +13,12 @@ router = APIRouter(prefix="/events/{event_id}/matches", tags=["matches"])
 
 
 @router.post("", response_model=MatchRead, status_code=201)
-def create_match(event_id: int, payload: MatchCreate, db: Session = Depends(get_db)) -> Match:
+def create_match(
+    event_id: int,
+    payload: MatchCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> Match:
     match = Match(event_id=event_id, **payload.model_dump())
     db.add(match)
     db.commit()
@@ -36,6 +43,7 @@ def generate_event_fixture(
     start_time: str = "17:00",
     set_minutes: int = 22,
     db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
 ) -> list[Match]:
     if minimum_matches < 1:
         raise HTTPException(status_code=400, detail="El minimo de partidos debe ser mayor a 0")
@@ -63,6 +71,7 @@ def generate_event_bracket(
     event_id: int,
     courts: str | None = None,
     db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
 ) -> list[Match]:
     court_names = courts.split(",") if courts else None
     return generate_tournament_bracket(db, event_id, courts=court_names)
@@ -74,6 +83,7 @@ def register_result(
     match_id: int,
     payload: MatchResultUpdate,
     db: Session = Depends(get_db),
+    _: User = Depends(require_permission("tablet")),
 ) -> Match:
     match = db.scalar(select(Match).where(Match.id == match_id, Match.event_id == event_id))
     if not match:
