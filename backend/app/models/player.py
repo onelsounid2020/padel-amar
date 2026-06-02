@@ -23,6 +23,7 @@ class Player(Base):
     __tablename__ = "players"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(40))
     category: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -32,6 +33,7 @@ class Player(Base):
     pairs_as_player_one = relationship("EventPair", back_populates="player_one", foreign_keys="EventPair.player_one_id")
     pairs_as_player_two = relationship("EventPair", back_populates="player_two", foreign_keys="EventPair.player_two_id")
     payments = relationship("PlayerPayment", back_populates="player", cascade="all, delete-orphan")
+    user = relationship("User")
 
 
 class EventPair(Base):
@@ -51,4 +53,5 @@ class EventPair(Base):
     player_two = relationship("Player", foreign_keys=[player_two_id], back_populates="pairs_as_player_two")
     payments = relationship("Payment", back_populates="pair", cascade="all, delete-orphan")
     player_payments = relationship("PlayerPayment", back_populates="pair", cascade="all, delete-orphan")
+    registrations = relationship("EventRegistration", back_populates="pair", cascade="all, delete-orphan")
     standings = relationship("Standing", back_populates="pair", cascade="all, delete-orphan")

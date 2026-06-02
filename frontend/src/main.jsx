@@ -41,6 +41,7 @@ const emptyPublicRegistration = {
   preferred_side: "indiferente",
   partner_name: "",
   partner_phone: "",
+  partner_member_id: "",
   partner_paid: false,
   partner_preferred_side: "indiferente",
 };
@@ -136,6 +137,7 @@ function App() {
   const [standings, setStandings] = useState([]);
   const [ranking, setRanking] = useState([]);
   const [users, setUsers] = useState([]);
+  const [members, setMembers] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventForm, setEventForm] = useState(emptyEvent);
   const [playerForm, setPlayerForm] = useState(emptyPlayer);
@@ -200,16 +202,18 @@ function App() {
     const effectivePermissions = effectiveUser?.role === "superadmin"
       ? Object.fromEntries(fallbackPermissionModules.map((module) => [module.key, true]))
       : permissionOverride;
-    const [dashboardData, eventsData, playersData, userData] = await Promise.all([
+    const [dashboardData, eventsData, playersData, userData, memberData] = await Promise.all([
       api.dashboard(),
       api.events(),
       effectiveUser && effectivePermissions.events ? api.players() : Promise.resolve([]),
       effectiveUser && effectivePermissions.users ? api.users() : Promise.resolve([]),
+      api.publicMembers(),
     ]);
     setDashboard(dashboardData);
     setEvents(eventsData);
     setPlayers(playersData);
     setUsers(userData);
+    setMembers(memberData);
     if (!selectedEventId && eventsData[0]) setSelectedEventId(String(eventsData[0].id));
   }
 
@@ -411,11 +415,13 @@ function App() {
       ];
       const category = categoryLabel(publicForm.category || eventCategories[0] || "1era");
       await api.publicRegister(selectedEventId, {
+        player_user_id: authUser?.role === "jugador" ? authUser.id : null,
         name: publicForm.name,
         phone: publicForm.phone || null,
         paid: publicForm.paid,
         category,
         preferred_side: publicForm.preferred_side,
+        partner_user_id: publicForm.partner_member_id || null,
         partner_name: publicForm.partner_name || null,
         partner_phone: publicForm.partner_phone || null,
         partner_paid: publicForm.partner_paid,
@@ -559,6 +565,7 @@ function App() {
       setSelectedEventId={setSelectedEventId}
       selectedEvent={selectedEvent}
       authUser={authUser}
+      members={members}
       form={publicForm}
       setForm={setPublicForm}
       success={registrationSuccess}
@@ -1870,8 +1877,9 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }
   );
 }
 
-function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, form, setForm, success, setSuccess, onSubmit }) {
+function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, onSubmit }) {
   const [partnerMode, setPartnerMode] = useState("searching");
+  const [partnerSource, setPartnerSource] = useState("member");
   const eventCategories = [
     ...new Set([
       ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
@@ -1881,6 +1889,30 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
   const options = eventCategories.length ? eventCategories : categoryOptions[form.gender];
   const hasPartner = partnerMode === "complete";
   const selectedCategory = form.category || options[0] || "";
+  const availableMembers = members.filter((member) => member.id !== authUser?.id);
+  const selectedPartnerMember = availableMembers.find((member) => String(member.id) === String(form.partner_member_id));
+
+  function applyPartnerMember(memberId) {
+    const member = availableMembers.find((item) => String(item.id) === String(memberId));
+    setForm({
+      ...form,
+      partner_member_id: memberId,
+      partner_name: member?.name || "",
+      partner_phone: member?.phone || "",
+      partner_preferred_side: member?.preferred_side || "indiferente",
+    });
+  }
+
+  function useGuestPartner() {
+    setPartnerSource("guest");
+    setForm({
+      ...form,
+      partner_member_id: "",
+      partner_name: "",
+      partner_phone: "",
+      partner_preferred_side: "indiferente",
+    });
+  }
 
   return (
     <section className="public-page">
@@ -1985,7 +2017,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 className={!hasPartner ? "active" : ""}
                 onClick={() => {
                   setPartnerMode("searching");
-                  setForm({ ...form, partner_name: "", partner_phone: "", partner_paid: false });
+                  setForm({ ...form, partner_member_id: "", partner_name: "", partner_phone: "", partner_paid: false });
                 }}
               >
                 Busco partner
@@ -1997,22 +2029,65 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
 
             {hasPartner && (
               <>
-                <label className="form-field">
-                  <span>Nombre partner</span>
-                  <input placeholder="Nombre y apellido" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} />
-                </label>
-                <label className="form-field">
-                  <span>Teléfono partner</span>
-                  <input placeholder="Opcional" value={form.partner_phone} onChange={(e) => setForm({ ...form, partner_phone: e.target.value })} />
-                </label>
-                <label className="form-field">
-                  <span>Lado partner</span>
-                  <select value={form.partner_preferred_side} onChange={(e) => setForm({ ...form, partner_preferred_side: e.target.value })}>
-                    <option value="drive">Drive</option>
-                    <option value="reves">Revés</option>
-                    <option value="indiferente">Indiferente</option>
-                  </select>
-                </label>
+                <div className="partner-source">
+                  <button
+                    type="button"
+                    className={partnerSource === "member" ? "active" : ""}
+                    onClick={() => setPartnerSource("member")}
+                  >
+                    Miembro registrado
+                  </button>
+                  <button
+                    type="button"
+                    className={partnerSource === "guest" ? "active" : ""}
+                    onClick={useGuestPartner}
+                  >
+                    Invitado sin cuenta
+                  </button>
+                </div>
+
+                {partnerSource === "member" ? (
+                  <>
+                    <label className="form-field wide-field">
+                      <span>Seleccionar partner</span>
+                      <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)}>
+                        <option value="">Buscar en miembros registrados</option>
+                        {availableMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}{member.category ? ` · ${member.category}` : ""}{member.preferred_side ? ` · ${member.preferred_side}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <small>Si no aparece en esta lista, usa Invitado sin cuenta.</small>
+                    </label>
+                    {selectedPartnerMember && (
+                      <div className="member-preview">
+                        <strong>{selectedPartnerMember.name}</strong>
+                        <span>{selectedPartnerMember.category || "Sin categoría"} · {selectedPartnerMember.preferred_side || "lado indiferente"}</span>
+                        {selectedPartnerMember.phone && <small>{selectedPartnerMember.phone}</small>}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label className="form-field">
+                      <span>Nombre partner</span>
+                      <input placeholder="Nombre y apellido" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} />
+                    </label>
+                    <label className="form-field">
+                      <span>Teléfono partner</span>
+                      <input placeholder="Opcional" value={form.partner_phone} onChange={(e) => setForm({ ...form, partner_phone: e.target.value })} />
+                    </label>
+                    <label className="form-field">
+                      <span>Lado partner</span>
+                      <select value={form.partner_preferred_side} onChange={(e) => setForm({ ...form, partner_preferred_side: e.target.value })}>
+                        <option value="drive">Drive</option>
+                        <option value="reves">Revés</option>
+                        <option value="indiferente">Indiferente</option>
+                      </select>
+                    </label>
+                  </>
+                )}
               </>
             )}
             <div className="form-divider">Pago</div>

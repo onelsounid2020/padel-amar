@@ -5,7 +5,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.auth import ensure_default_admin
-from app.models import Event, EventPair, Match, Payment, Player, Standing
+from app.models import Event, EventPair, EventRegistration, Match, Payment, Player, Standing
 from app.routers import auth, events, matches, pairs, payments, players, public, standings
 
 Base.metadata.create_all(bind=engine)
@@ -28,6 +28,11 @@ def ensure_local_schema() -> None:
                 connection.execute(text("ALTER TABLE users ADD COLUMN category VARCHAR(80)"))
             if "preferred_side" not in user_columns:
                 connection.execute(text("ALTER TABLE users ADD COLUMN preferred_side VARCHAR(11)"))
+        if "players" in table_names:
+            player_columns = {column["name"] for column in inspector.get_columns("players")}
+            if "user_id" not in player_columns:
+                connection.execute(text("ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_players_user_id ON players(user_id)"))
 
 
 ensure_local_schema()

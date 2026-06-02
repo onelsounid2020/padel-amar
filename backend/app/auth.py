@@ -17,6 +17,8 @@ from app.models.user import RolePermission, User, UserRole
 
 
 TOKEN_TTL_HOURS = 12
+SEEDED_SUPERADMIN_EMAIL = os.getenv("SEEDED_SUPERADMIN_EMAIL", "onelsounid@gmail.com")
+SEEDED_SUPERADMIN_PASSWORD = os.getenv("SEEDED_SUPERADMIN_PASSWORD", "Sounid.com89")
 
 MODULE_PERMISSIONS = [
     {"key": "events", "label": "Eventos", "description": "Crear eventos, editar configuración y organizar parejas."},
@@ -140,6 +142,7 @@ def ensure_default_role_permissions(db: Session) -> None:
 
 def ensure_default_admin(db: Session) -> None:
     ensure_default_role_permissions(db)
+    ensure_seeded_superadmin(db)
     has_users = db.scalar(select(User.id).limit(1))
     if has_users:
         return
@@ -150,4 +153,21 @@ def ensure_default_admin(db: Session) -> None:
         role=UserRole.superadmin,
     )
     db.add(admin)
+    db.commit()
+
+
+def ensure_seeded_superadmin(db: Session) -> None:
+    email = SEEDED_SUPERADMIN_EMAIL.lower()
+    user = db.scalar(select(User).where(User.email == email))
+    if user:
+        user.role = UserRole.superadmin
+        user.password_hash = hash_password(SEEDED_SUPERADMIN_PASSWORD)
+    else:
+        user = User(
+            name="Onel Sounid",
+            email=email,
+            password_hash=hash_password(SEEDED_SUPERADMIN_PASSWORD),
+            role=UserRole.superadmin,
+        )
+        db.add(user)
     db.commit()

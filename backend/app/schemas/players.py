@@ -16,11 +16,12 @@ class PlayerBase(BaseModel):
 
 
 class PlayerCreate(PlayerBase):
-    pass
+    user_id: int | None = None
 
 
 class PlayerRead(PlayerBase, ORMModel):
     id: int
+    user_id: int | None = None
     created_at: datetime
 
 

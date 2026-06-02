@@ -81,4 +81,5 @@ export const api = {
   whatsapp: (eventId) => request(`/events/${eventId}/whatsapp`),
   publicRegister: (eventId, data) =>
     request(`/public/events/${eventId}/registrations`, { method: "POST", body: JSON.stringify(data) }),
+  publicMembers: () => request("/public/members"),
 };
