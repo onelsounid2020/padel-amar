@@ -160,7 +160,7 @@ function App() {
   const [currentPermissions, setCurrentPermissions] = useState(publicPermissions);
   const [permissionModules, setPermissionModules] = useState(fallbackPermissionModules);
   const [rolePermissions, setRolePermissions] = useState([]);
-  const [loginForm, setLoginForm] = useState({ email: "admin@amarpadel.local", password: "admin123" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [signupForm, setSignupForm] = useState({
     name: "",
     email: "",
@@ -739,14 +739,28 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false }) {
         <p className="eyebrow">Acceso AmarPadel</p>
         <h1>{compact ? "Acceso operador" : "Panel administrativo"}</h1>
         <p>Ingresa con una cuenta autorizada para administrar eventos, pagos, parejas o resultados.</p>
-        <form onSubmit={onSubmit} className="login-form">
+        <form onSubmit={onSubmit} className="login-form" autoComplete="off">
           <label className="form-field">
             <span>Email</span>
-            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
+            <input
+              type="email"
+              name="amar-login-email"
+              autoComplete="off"
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+              required
+            />
           </label>
           <label className="form-field">
             <span>Contraseña</span>
-            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+            <input
+              type="password"
+              name="amar-login-password"
+              autoComplete="new-password"
+              value={form.password}
+              onChange={(event) => setForm({ ...form, password: event.target.value })}
+              required
+            />
           </label>
           <button disabled={loading}>Entrar</button>
         </form>
