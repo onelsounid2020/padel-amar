@@ -1,3 +1,6 @@
+import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
@@ -7,6 +10,14 @@ from app.database import Base, SessionLocal, engine
 from app.auth import ensure_default_admin
 from app.models import Event, EventPair, EventRegistration, Match, Payment, Player, Standing
 from app.routers import auth, events, matches, pairs, payments, players, public, standings
+
+logger = logging.getLogger("amar.database")
+
+if os.getenv("RAILWAY_ENVIRONMENT") and settings.sqlalchemy_database_url.startswith("sqlite"):
+    logger.warning(
+        "Production-like Railway environment is using SQLite. "
+        "Migrate DATABASE_URL to Railway PostgreSQL before relying on persistent production data."
+    )
 
 Base.metadata.create_all(bind=engine)
 
@@ -109,3 +120,11 @@ app.include_router(standings.router)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/db")
+def database_health() -> dict[str, str]:
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+    database = "postgresql" if settings.sqlalchemy_database_url.startswith("postgresql") else "sqlite"
+    return {"status": "ok", "database": database}
