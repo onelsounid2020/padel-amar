@@ -1194,7 +1194,7 @@ function TabletResults({ events, pairs, matches, standings, selectedEventId, set
                 </div>
               </div>
               <button className="tablet-save" type="button" disabled={!canSave || loading} onClick={() => saveMatch(row.match.id)}>
-                <Check size={20} /> Guardar
+                <Check size={16} /> {row.done ? "OK" : "Guardar"}
               </button>
             </article>
           );

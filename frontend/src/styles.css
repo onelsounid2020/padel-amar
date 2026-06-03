@@ -2169,14 +2169,14 @@ h3 {
 
 .tablet-page {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .tablet-shell {
   margin: 0 auto;
-  max-width: 1680px;
+  max-width: 1920px;
   min-height: 100vh;
-  padding: 6px;
+  padding: 5px;
 }
 
 .tablet-alert {
@@ -2189,24 +2189,24 @@ h3 {
   border-radius: 8px;
   color: #ffffff;
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto minmax(220px, 330px) 52px;
-  min-height: 58px;
-  padding: 7px 9px;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(190px, 300px) 44px;
+  min-height: 50px;
+  padding: 6px 8px;
   position: sticky;
   top: 8px;
   z-index: 4;
 }
 
 .tablet-top > strong {
-  font-size: clamp(1rem, 2vw, 1.45rem);
+  font-size: clamp(0.95rem, 1.8vw, 1.25rem);
   line-height: 1.05;
   min-width: 0;
 }
 
 .tablet-top span {
   color: #dff2fb;
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -2216,7 +2216,7 @@ h3 {
   background: #a8e641;
   box-shadow: none;
   color: #08223b;
-  min-height: 46px;
+  min-height: 40px;
   padding: 0;
 }
 
@@ -2227,20 +2227,20 @@ h3 {
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 6px;
+  padding: 5px;
   position: sticky;
-  top: 66px;
+  top: 57px;
   z-index: 3;
 }
 
 .tablet-controls select,
 .tablet-top select {
-  min-height: 42px;
+  min-height: 36px;
 }
 
 .tablet-match-grid {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
@@ -2250,30 +2250,31 @@ h3 {
   border-radius: 8px;
   box-shadow: 0 8px 16px rgb(20 53 78 / 0.08);
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 4px;
+  padding: 6px;
 }
 
 .tablet-match.done {
+  background: #f1fbf0;
   border-color: #13a66f;
 }
 
 .tablet-match-head {
   align-items: center;
   display: grid;
-  gap: 5px;
-  grid-template-columns: minmax(58px, auto) minmax(58px, auto) minmax(0, 1fr);
+  gap: 4px;
+  grid-template-columns: minmax(46px, auto) minmax(48px, auto) minmax(0, 1fr);
 }
 
 .tablet-match-head span,
 .tablet-match-head strong,
 .tablet-match-head em {
   border-radius: 7px;
-  font-size: 0.74rem;
+  font-size: 0.66rem;
   font-style: normal;
   font-weight: 900;
-  min-height: 28px;
-  padding: 5px 6px;
+  min-height: 24px;
+  padding: 4px 5px;
   text-align: center;
 }
 
@@ -2295,50 +2296,53 @@ h3 {
 .tablet-score-row {
   align-items: center;
   display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) 128px;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 108px;
+  min-height: 34px;
 }
 
 .tablet-score-row > strong {
   color: #08223b;
-  font-size: 0.9rem;
-  line-height: 1.2;
+  font-size: 0.78rem;
+  line-height: 1.1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .tablet-score-control {
   display: grid;
-  gap: 4px;
-  grid-template-columns: 38px 48px 38px;
+  gap: 3px;
+  grid-template-columns: 32px 38px 32px;
 }
 
 .tablet-score-control button {
   box-shadow: none;
-  font-size: 1.25rem;
-  min-height: 40px;
+  font-size: 1.05rem;
+  min-height: 34px;
   padding: 0;
 }
 
 .tablet-score-control input {
-  font-size: 1.35rem;
+  font-size: 1.1rem;
   font-weight: 900;
-  min-height: 40px;
-  padding: 4px;
+  min-height: 34px;
+  padding: 2px;
   text-align: center;
 }
 
 .tablet-versus {
   color: #0e5d8f;
-  font-size: 0.82rem;
+  font-size: 0.65rem;
   font-weight: 900;
+  line-height: 1;
   text-align: center;
   text-transform: uppercase;
 }
 
 .tablet-save {
-  font-size: 0.9rem;
-  min-height: 40px;
+  font-size: 0.78rem;
+  min-height: 34px;
+  padding: 0 8px;
 }
 
 .tablet-empty {
@@ -2380,9 +2384,15 @@ h3 {
   display: none;
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1023px) {
   .tablet-match-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .tablet-match-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2488,10 +2498,6 @@ h3 {
   .tablet-controls,
   .tablet-score-row {
     grid-template-columns: 1fr;
-  }
-
-  .tablet-match-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .tablet-top {
