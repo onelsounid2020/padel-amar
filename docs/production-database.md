@@ -22,6 +22,9 @@ TABLET_ACCESS_TOKEN=<token-largo>
 AUTH_SECRET=<token-largo-distinto>
 ```
 
+`AUTH_SECRET` debe ser estable y distinto de `TABLET_ACCESS_TOKEN`; si cambia, las sesiones activas expiran.
+El backend aplica un rate limit en memoria para `/auth/login` y `/auth/tablet-login`; si aparece HTTP 429, esperar unos minutos o revisar intentos automatizados.
+
 ## Migracion SQLite a PostgreSQL
 
 No ejecutar sobre produccion sin backup descargado.

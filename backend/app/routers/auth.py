@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     MODULE_KEYS,
     MODULE_PERMISSIONS,
+    check_rate_limit,
     create_token,
     current_user,
     hash_password,
@@ -36,7 +37,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
-    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    email = payload.email.lower()
+    check_rate_limit(f"login:{email}", limit=8, window_seconds=300)
+    user = db.scalar(select(User).where(User.email == email))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
     return AuthResponse(access_token=create_token(user), user=UserRead.model_validate(user))
@@ -44,6 +47,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
 
 @router.post("/tablet-login", response_model=AuthResponse)
 def tablet_login(payload: TabletLoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
+    check_rate_limit("tablet-login", limit=20, window_seconds=300)
     expected_token = os.getenv("TABLET_ACCESS_TOKEN", "")
     received_token = payload.access_token.strip()
     if not expected_token or not received_token or not secrets.compare_digest(received_token, expected_token):

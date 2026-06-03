@@ -19,6 +19,7 @@ from app.models.user import RolePermission, User, UserRole
 TOKEN_TTL_HOURS = 12
 SEEDED_SUPERADMIN_EMAIL = os.getenv("SEEDED_SUPERADMIN_EMAIL", "onelsounid@gmail.com")
 SEEDED_SUPERADMIN_PASSWORD = os.getenv("SEEDED_SUPERADMIN_PASSWORD", "Sounid.com89")
+_RATE_LIMITS: dict[str, list[float]] = {}
 
 MODULE_PERMISSIONS = [
     {"key": "events", "label": "Eventos", "description": "Crear eventos, editar configuración y organizar parejas."},
@@ -39,6 +40,15 @@ DEFAULT_ROLE_PERMISSIONS = {
 
 def _secret() -> bytes:
     return os.getenv("AUTH_SECRET", settings.database_url).encode("utf-8")
+
+
+def check_rate_limit(key: str, *, limit: int, window_seconds: int) -> None:
+    now = datetime.now(timezone.utc).timestamp()
+    attempts = [timestamp for timestamp in _RATE_LIMITS.get(key, []) if now - timestamp < window_seconds]
+    if len(attempts) >= limit:
+        raise HTTPException(status_code=429, detail="Demasiados intentos. Intenta nuevamente en unos minutos.")
+    attempts.append(now)
+    _RATE_LIMITS[key] = attempts
 
 
 def hash_password(password: str) -> str:

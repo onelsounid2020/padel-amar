@@ -18,6 +18,8 @@ if os.getenv("RAILWAY_ENVIRONMENT") and settings.sqlalchemy_database_url.startsw
         "Production-like Railway environment is using SQLite. "
         "Migrate DATABASE_URL to Railway PostgreSQL before relying on persistent production data."
     )
+if os.getenv("RAILWAY_ENVIRONMENT") and not os.getenv("AUTH_SECRET"):
+    logger.warning("AUTH_SECRET is not configured. Set a long random value so session tokens survive database changes safely.")
 
 Base.metadata.create_all(bind=engine)
 
