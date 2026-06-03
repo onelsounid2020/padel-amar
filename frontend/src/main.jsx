@@ -299,6 +299,27 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabletAccessToken = pageFromLocation() === "tablet" ? params.get("access") : "";
+    if (tabletAccessToken) {
+      setLoading(true);
+      api.tabletLogin(tabletAccessToken)
+        .then(async (response) => {
+          setAuthToken(response.access_token);
+          setAuthUser(response.user);
+          const permissions = await loadPermissions(response.user);
+          await loadBase(response.user, permissions);
+          await loadEventData(selectedEventId, response.user, permissions);
+          window.history.replaceState({}, "", "/tablet");
+        })
+        .catch((err) => {
+          setAuthToken("");
+          setError(err.message);
+        })
+        .finally(() => setLoading(false));
+      return;
+    }
+
     api.me()
       .then(async (user) => {
         setAuthUser(user);

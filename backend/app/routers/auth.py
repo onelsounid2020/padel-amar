@@ -1,3 +1,6 @@
+import os
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -22,6 +25,7 @@ from app.schemas.auth import (
     PlayerSignup,
     RolePermissionRead,
     RolePermissionUpdate,
+    TabletLoginRequest,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -35,6 +39,33 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
+    return AuthResponse(access_token=create_token(user), user=UserRead.model_validate(user))
+
+
+@router.post("/tablet-login", response_model=AuthResponse)
+def tablet_login(payload: TabletLoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
+    expected_token = os.getenv("TABLET_ACCESS_TOKEN", "")
+    received_token = payload.access_token.strip()
+    if not expected_token or not received_token or not secrets.compare_digest(received_token, expected_token):
+        raise HTTPException(status_code=401, detail="Acceso tablet invalido")
+
+    email = os.getenv("TABLET_USER_EMAIL", "tablet@amarpadel.local").lower()
+    user = db.scalar(select(User).where(User.email == email))
+    if not user:
+        user = User(
+            name=os.getenv("TABLET_USER_NAME", "Tablet AMAR"),
+            email=email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            role=UserRole.operador,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    elif user.role != UserRole.operador:
+        user.role = UserRole.operador
+        db.commit()
+        db.refresh(user)
+
     return AuthResponse(access_token=create_token(user), user=UserRead.model_validate(user))
 
 

@@ -28,6 +28,7 @@ async function request(path, options = {}) {
 
 export const api = {
   login: (data) => request("/auth/login", { method: "POST", body: JSON.stringify(data) }),
+  tabletLogin: (accessToken) => request("/auth/tablet-login", { method: "POST", body: JSON.stringify({ access_token: accessToken }) }),
   registerPlayer: (data) => request("/auth/register", { method: "POST", body: JSON.stringify(data) }),
   me: () => request("/auth/me"),
   users: () => request("/auth/users"),

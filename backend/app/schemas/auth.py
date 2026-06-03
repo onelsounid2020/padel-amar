@@ -12,6 +12,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class TabletLoginRequest(BaseModel):
+    access_token: str
+
+
 class UserCreate(BaseModel):
     name: str
     email: str
