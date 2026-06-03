@@ -1873,6 +1873,12 @@ h3 {
   padding: 12px;
 }
 
+.registration-success.waitlisted {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #7c2d12;
+}
+
 .registration-success span {
   line-height: 1.35;
 }

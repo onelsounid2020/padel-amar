@@ -480,7 +480,7 @@ function App() {
         ]),
       ];
       const category = categoryLabel(publicForm.category || eventCategories[0] || "1era");
-      await api.publicRegister(selectedEventId, {
+      const registration = await api.publicRegister(selectedEventId, {
         player_user_id: authUser?.role === "jugador" ? authUser.id : null,
         name: publicForm.name,
         email: playerEmail,
@@ -500,6 +500,7 @@ function App() {
         eventName: selectedEvent?.name || "Evento",
         playerName: publicForm.name,
         partnerName: publicForm.partner_name,
+        waitlisted: registration.pair?.status === "lista_espera",
       });
       setPublicForm(authUser?.role === "jugador" ? {
         ...emptyPublicRegistration,
@@ -1875,11 +1876,11 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
 
         <section className="panel registration-panel">
           {success && (
-            <div className="registration-success">
-              <strong>Inscripción registrada</strong>
+            <div className={`registration-success ${success.waitlisted ? "waitlisted" : ""}`}>
+              <strong>{success.waitlisted ? "Quedaste en lista de espera" : "Inscripción registrada"}</strong>
               <span>
                 {success.playerName}
-                {success.partnerName ? ` y ${success.partnerName}` : ""} quedaron inscritos en {success.eventName}.
+                {success.partnerName ? ` y ${success.partnerName}` : ""} {success.waitlisted ? "quedaron en lista de espera para" : "quedaron inscritos en"} {success.eventName}.
               </span>
               <button type="button" className="secondary-action" onClick={() => setSuccess(null)}>Inscribir otra persona</button>
             </div>
@@ -2074,7 +2075,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
               {selectedEventPairs.length ? selectedEventPairs.map((pair) => (
                 <div key={pair.id} className="registered-list-item">
                   <strong>{pairName(pair)}</strong>
-                  <small>{pair.category} · {pair.status === "buscando_partner" ? "Buscando partner" : "Pareja completa"}</small>
+                  <small>{pair.category} · {pair.status === "lista_espera" ? "Lista de espera" : pair.status === "buscando_partner" ? "Buscando partner" : "Pareja completa"}</small>
                 </div>
               )) : <p className="muted">Sin inscritos todavia</p>}
             </div>

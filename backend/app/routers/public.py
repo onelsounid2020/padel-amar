@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -36,7 +36,8 @@ def list_members(db: Session = Depends(get_db)) -> list[User]:
 
 @router.post("/events/{event_id}/registrations", response_model=PublicRegistrationResponse, status_code=201)
 def register_player(event_id: int, payload: PublicRegistrationRequest, db: Session = Depends(get_db)) -> PublicRegistrationResponse:
-    if not db.get(Event, event_id):
+    event = db.get(Event, event_id)
+    if not event:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
 
     player_one = _player_for_registration(
@@ -66,12 +67,31 @@ def register_player(event_id: int, payload: PublicRegistrationRequest, db: Sessi
         ensure_different_players(player_one, player_two)
         ensure_not_registered(db, event_id, player_two)
 
+    active_pairs = db.scalar(
+        select(func.count(EventPair.id)).where(
+            EventPair.event_id == event_id,
+            EventPair.status != PairStatus.lista_espera,
+        )
+    ) or 0
+    is_waitlist = active_pairs >= event.capacity
+    pair_status = (
+        PairStatus.lista_espera
+        if is_waitlist
+        else PairStatus.completa if player_two else PairStatus.buscando_partner
+    )
+    primary_registration_status = (
+        RegistrationStatus.lista_espera
+        if is_waitlist
+        else RegistrationStatus.confirmada if player_two else RegistrationStatus.buscando_partner
+    )
+    partner_registration_status = RegistrationStatus.lista_espera if is_waitlist else RegistrationStatus.confirmada
+
     pair = EventPair(
         event_id=event_id,
         player_one_id=player_one.id,
         player_two_id=player_two.id if player_two else None,
         category=payload.category,
-        status=PairStatus.completa if player_two else PairStatus.buscando_partner,
+        status=pair_status,
     )
     db.add(pair)
     db.flush()
@@ -82,7 +102,7 @@ def register_player(event_id: int, payload: PublicRegistrationRequest, db: Sessi
         player=player_one,
         role=RegistrationRole.jugador,
         category=payload.category,
-        status=RegistrationStatus.confirmada if player_two else RegistrationStatus.buscando_partner,
+        status=primary_registration_status,
         payment_status=PaymentStatus.pagado if payload.paid else PaymentStatus.pendiente,
     )
     if player_two:
@@ -93,7 +113,7 @@ def register_player(event_id: int, payload: PublicRegistrationRequest, db: Sessi
             player=player_two,
             role=RegistrationRole.partner,
             category=payload.category,
-            status=RegistrationStatus.confirmada,
+            status=partner_registration_status,
             payment_status=PaymentStatus.pagado if payload.partner_paid else PaymentStatus.pendiente,
         )
     try:

@@ -588,7 +588,12 @@ def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
 
 
 def sync_player_payments(db: Session, event_id: int) -> list[PlayerPayment]:
-    pairs = db.scalars(select(EventPair).where(EventPair.event_id == event_id)).all()
+    pairs = db.scalars(
+        select(EventPair).where(
+            EventPair.event_id == event_id,
+            EventPair.status != PairStatus.lista_espera,
+        )
+    ).all()
     legacy_by_pair = {
         payment.pair_id: payment
         for payment in db.scalars(select(Payment).where(Payment.event_id == event_id)).all()
