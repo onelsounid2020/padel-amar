@@ -48,6 +48,10 @@ function fixtureCategoryFromPairs(pairOne, pairTwo, fallbackCategory) {
   return fallbackCategory;
 }
 
+function normalizeScore(value) {
+  return value === null || value === undefined ? "" : String(value);
+}
+
 export function TabletResults({
   events,
   pairs,
@@ -94,8 +98,8 @@ export function TabletResults({
     setScores(Object.fromEntries(matches.map((match) => [
       match.id,
       {
-        pair_one_score: match.pair_one_score ?? "",
-        pair_two_score: match.pair_two_score ?? "",
+        pair_one_score: normalizeScore(match.pair_one_score),
+        pair_two_score: normalizeScore(match.pair_two_score),
       },
     ])));
   }, [matches]);
@@ -117,6 +121,19 @@ export function TabletResults({
     && (!activeTurn || (row.time || row.turn) === activeTurn)
     && (statusFilter === "all" || (statusFilter === "pending" ? !row.done : row.done))
   ));
+  const hasUnsavedScores = matchRows.some((row) => {
+    const current = scores[row.match.id] || {};
+    return normalizeScore(current.pair_one_score) !== normalizeScore(row.match.pair_one_score)
+      || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
+  });
+
+  useEffect(() => {
+    if (hasUnsavedScores || loading) return undefined;
+    const interval = window.setInterval(() => {
+      onRefresh();
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [hasUnsavedScores, loading, onRefresh]);
 
   function setScore(matchId, field, value) {
     const numericValue = Math.max(0, Number(value || 0));
@@ -147,7 +164,7 @@ export function TabletResults({
     <section className="tablet-page">
       <div className="tablet-top">
         <strong>{selectedEvent ? selectedEvent.name : "Mesa de resultados"}</strong>
-        <span>{completedCount}/{matchRows.length} cargados · {pendingCount} pendientes</span>
+        <span>{completedCount}/{matchRows.length} cargados · {pendingCount} pendientes{hasUnsavedScores ? " · cambios sin guardar" : ""}</span>
         <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
           <option value="">Evento</option>
           {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
@@ -177,8 +194,10 @@ export function TabletResults({
         {visibleRows.length ? visibleRows.map((row) => {
           const current = scores[row.match.id] || { pair_one_score: "", pair_two_score: "" };
           const canSave = selectedEventId && current.pair_one_score !== "" && current.pair_two_score !== "";
+          const isDirty = normalizeScore(current.pair_one_score) !== normalizeScore(row.match.pair_one_score)
+            || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
           return (
-            <article className={`tablet-match ${row.done ? "done" : ""}`} key={row.match.id}>
+            <article className={`tablet-match ${row.done ? "done" : ""} ${isDirty ? "dirty" : ""}`} key={row.match.id}>
               <div className="tablet-match-head">
                 <span>{row.time || row.turn}</span>
                 <strong>{row.courtLabel}</strong>
@@ -214,7 +233,7 @@ export function TabletResults({
                 </div>
               </div>
               <button className="tablet-save" type="button" disabled={!canSave || loading} onClick={() => saveMatch(row.match.id)}>
-                <Check size={16} /> {row.done ? "OK" : "Guardar"}
+                <Check size={16} /> {isDirty ? "Guardar" : row.done ? "OK" : "Guardar"}
               </button>
             </article>
           );

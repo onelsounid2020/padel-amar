@@ -2259,6 +2259,16 @@ h3 {
   border-color: #13a66f;
 }
 
+.tablet-match.dirty {
+  background: #fff8e8;
+  border-color: #f4b740;
+}
+
+.tablet-match.dirty .tablet-save {
+  background: linear-gradient(135deg, #f4b740, #13a66f);
+  color: #08223b;
+}
+
 .tablet-match-head {
   align-items: center;
   display: grid;
