@@ -67,6 +67,26 @@ Checklist visual:
 - Tablet entra con token y puede guardar un resultado de prueba controlado.
 - Ranking recalcula.
 
+## Reparacion de datos existentes
+
+Si hay parejas creadas antes de las validaciones nuevas, pueden faltar filas en `event_registrations` o existir pagos asociados a lista de espera. El script de reparacion trabaja solo sobre la base apuntada por `DATABASE_URL`.
+
+Primero revisar sin escribir:
+
+```bash
+cd backend
+python scripts/repair_event_integrity.py
+```
+
+Aplicar solo despues de confirmar que Railway esta usando la base correcta:
+
+```bash
+cd backend
+python scripts/repair_event_integrity.py --apply
+```
+
+No usar este script para copiar datos entre local y produccion. Solo normaliza la base actualmente conectada.
+
 ## Rollback
 
 Si algo falla antes de escribir datos nuevos en Postgres:
