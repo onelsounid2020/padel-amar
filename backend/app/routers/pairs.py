@@ -9,7 +9,8 @@ from app.models.match import Match
 from app.models.payment import Payment
 from app.models.standing import Standing
 from app.models.player import EventPair, PairStatus, Player
-from app.registration_guard import ensure_different_players, ensure_not_registered
+from app.models.registration import EventRegistration, RegistrationRole, RegistrationStatus
+from app.registration_guard import ensure_different_players, ensure_not_registered, primary_identity_key
 from app.models.user import User
 from app.schemas.players import PairCreate, PairRead, PairUpdate
 from app.services import recalculate_standings
@@ -45,6 +46,7 @@ def create_pair(
     pair = EventPair(event_id=event_id, **data)
     db.add(pair)
     db.flush()
+    _sync_pair_registrations(db, pair)
     _sync_legacy_pair_payment(db, pair)
     db.commit()
     return _get_pair(db, pair.id)
@@ -93,6 +95,7 @@ def update_pair(
     for key, value in data.items():
         setattr(pair, key, value)
     db.flush()
+    _sync_pair_registrations(db, pair)
     _sync_legacy_pair_payment(db, pair)
     db.commit()
     return _get_pair(db, pair_id)
@@ -164,3 +167,47 @@ def _sync_legacy_pair_payment(db: Session, pair: EventPair) -> None:
         return
     if not existing:
         db.add(Payment(event_id=pair.event_id, pair_id=pair.id))
+
+
+def _sync_pair_registrations(db: Session, pair: EventPair) -> None:
+    db.execute(delete(EventRegistration).where(EventRegistration.pair_id == pair.id))
+    player_one = db.get(Player, pair.player_one_id)
+    player_two = db.get(Player, pair.player_two_id) if pair.player_two_id else None
+    if not player_one:
+        raise HTTPException(status_code=404, detail="Jugador 1 no encontrado")
+    primary_status, partner_status = _registration_statuses(pair.status, pair.player_two_id is not None)
+    db.add(
+        EventRegistration(
+            event_id=pair.event_id,
+            pair_id=pair.id,
+            player_id=pair.player_one_id,
+            user_id=player_one.user_id,
+            identity_key=primary_identity_key(player_one),
+            role=RegistrationRole.jugador,
+            category=pair.category,
+            status=primary_status,
+            source="admin",
+        )
+    )
+    if player_two:
+        db.add(
+            EventRegistration(
+                event_id=pair.event_id,
+                pair_id=pair.id,
+                player_id=pair.player_two_id,
+                user_id=player_two.user_id,
+                identity_key=primary_identity_key(player_two),
+                role=RegistrationRole.partner,
+                category=pair.category,
+                status=partner_status,
+                source="admin",
+            )
+        )
+
+
+def _registration_statuses(status: PairStatus, has_partner: bool) -> tuple[RegistrationStatus, RegistrationStatus]:
+    if status == PairStatus.lista_espera:
+        return RegistrationStatus.lista_espera, RegistrationStatus.lista_espera
+    if has_partner and status == PairStatus.completa:
+        return RegistrationStatus.confirmada, RegistrationStatus.confirmada
+    return RegistrationStatus.buscando_partner, RegistrationStatus.buscando_partner

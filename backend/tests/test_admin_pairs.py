@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Event, PairStatus, Payment, Player
+from app.models import Event, EventRegistration, PairStatus, Payment, Player, RegistrationStatus
 from app.routers.pairs import create_pair
 from app.schemas.players import PairCreate
 
@@ -71,6 +71,18 @@ class AdminPairsTest(unittest.TestCase):
         payments = self.db.scalars(select(Payment).where(Payment.event_id == self.event.id)).all()
         self.assertEqual(len(payments), 1)
         self.assertEqual(payments[0].pair_id, first.id)
+
+        first_registrations = self.db.scalars(
+            select(EventRegistration).where(EventRegistration.pair_id == first.id)
+        ).all()
+        second_registrations = self.db.scalars(
+            select(EventRegistration).where(EventRegistration.pair_id == second.id)
+        ).all()
+        self.assertEqual(len(first_registrations), 2)
+        self.assertEqual(len(second_registrations), 2)
+        self.assertEqual({registration.status for registration in first_registrations}, {RegistrationStatus.confirmada})
+        self.assertEqual({registration.status for registration in second_registrations}, {RegistrationStatus.lista_espera})
+        self.assertEqual({registration.source for registration in first_registrations + second_registrations}, {"admin"})
 
 
 if __name__ == "__main__":
