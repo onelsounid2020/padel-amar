@@ -12,9 +12,9 @@ class EventBase(BaseModel):
     date: DateType
     place: str
     categories: str
-    price: int
+    price: int = Field(ge=0)
     schedule: str
-    capacity: int
+    capacity: int = Field(gt=0)
     tournament_type: str
     category_configs: list[dict] = Field(default_factory=list)
     description: str | None = None
@@ -30,9 +30,9 @@ class EventUpdate(BaseModel):
     date: DateType | None = None
     place: str | None = None
     categories: str | None = None
-    price: int | None = None
+    price: int | None = Field(default=None, ge=0)
     schedule: str | None = None
-    capacity: int | None = None
+    capacity: int | None = Field(default=None, gt=0)
     tournament_type: str | None = None
     category_configs: list[dict] | None = None
     description: str | None = None
