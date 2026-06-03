@@ -25,6 +25,7 @@ class Player(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(180), index=True)
     phone: Mapped[str | None] = mapped_column(String(40))
     category: Mapped[str] = mapped_column(String(80), nullable=False)
     preferred_side: Mapped[PreferredSide | None] = mapped_column(Enum(PreferredSide))

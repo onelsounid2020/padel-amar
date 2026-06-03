@@ -33,6 +33,52 @@ def ensure_local_schema() -> None:
             if "user_id" not in player_columns:
                 connection.execute(text("ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_players_user_id ON players(user_id)"))
+                player_columns.add("user_id")
+            if "email" not in player_columns:
+                connection.execute(text("ALTER TABLE players ADD COLUMN email VARCHAR(180)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_players_email ON players(email)"))
+                player_columns.add("email")
+            if "users" in table_names and "user_id" in player_columns and "email" in player_columns:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE players
+                        SET email = (
+                            SELECT users.email
+                            FROM users
+                            WHERE users.id = players.user_id
+                        )
+                        WHERE players.user_id IS NOT NULL
+                        AND (players.email IS NULL OR players.email = '')
+                        """
+                    )
+                )
+        if "event_registrations" in table_names:
+            registration_columns = {column["name"] for column in inspector.get_columns("event_registrations")}
+            if "identity_key" not in registration_columns:
+                connection.execute(text("ALTER TABLE event_registrations ADD COLUMN identity_key VARCHAR(160)"))
+            duplicate_identities = connection.execute(
+                text(
+                    """
+                    SELECT event_id, identity_key
+                    FROM event_registrations
+                    WHERE identity_key IS NOT NULL
+                    GROUP BY event_id, identity_key
+                    HAVING COUNT(*) > 1
+                    LIMIT 1
+                    """
+                )
+            ).first()
+            if duplicate_identities is None:
+                connection.execute(
+                    text(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS uq_event_registration_identity_idx
+                        ON event_registrations(event_id, identity_key)
+                        WHERE identity_key IS NOT NULL
+                        """
+                    )
+                )
 
 
 ensure_local_schema()

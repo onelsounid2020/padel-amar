@@ -34,12 +34,14 @@ const emptyEvent = {
 const emptyPlayer = { name: "", phone: "", category: "", preferred_side: "indiferente" };
 const emptyPublicRegistration = {
   name: "",
+  email: "",
   phone: "",
   paid: false,
   gender: "hombre",
   category: "1era",
   preferred_side: "indiferente",
   partner_name: "",
+  partner_email: "",
   partner_phone: "",
   partner_member_id: "",
   partner_paid: false,
@@ -107,6 +109,10 @@ const categoryOptions = {
 
 function categoryLabel(category) {
   return category;
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || "").trim());
 }
 
 function pairName(pair) {
@@ -300,6 +306,7 @@ function App() {
       setPublicForm((current) => ({
         ...current,
         name: current.name || authUser.name,
+        email: current.email || authUser.email || "",
         phone: current.phone || authUser.phone || "",
         category: current.category || authUser.category || "5ta",
         preferred_side: current.preferred_side || authUser.preferred_side || "indiferente",
@@ -403,9 +410,39 @@ function App() {
 
   async function submitPublicRegistration(event) {
     event.preventDefault();
-    setLoading(true);
     setError("");
     setRegistrationSuccess(null);
+
+    const playerEmail = (authUser?.role === "jugador" ? authUser.email : publicForm.email).trim().toLowerCase();
+    const partnerEmail = publicForm.partner_email.trim().toLowerCase();
+    const comesWithPartner = Boolean(publicForm.partner_member_id || publicForm.partner_name.trim());
+
+    if (!selectedEventId) {
+      setError("Selecciona un evento para inscribirte.");
+      return;
+    }
+    if (!publicForm.name.trim()) {
+      setError("Ingresa el nombre del jugador.");
+      return;
+    }
+    if (!isValidEmail(playerEmail)) {
+      setError("Ingresa un email valido para el jugador.");
+      return;
+    }
+    if (comesWithPartner && !publicForm.partner_member_id && !publicForm.partner_name.trim()) {
+      setError("Ingresa el nombre del partner o selecciona un miembro registrado.");
+      return;
+    }
+    if (comesWithPartner && !publicForm.partner_member_id && !isValidEmail(partnerEmail)) {
+      setError("Ingresa un email valido para el partner.");
+      return;
+    }
+    if (comesWithPartner && !publicForm.partner_member_id && partnerEmail === playerEmail) {
+      setError("El partner debe tener un email distinto al jugador.");
+      return;
+    }
+
+    setLoading(true);
     try {
       const eventCategories = [
         ...new Set([
@@ -417,12 +454,14 @@ function App() {
       await api.publicRegister(selectedEventId, {
         player_user_id: authUser?.role === "jugador" ? authUser.id : null,
         name: publicForm.name,
+        email: playerEmail,
         phone: publicForm.phone || null,
         paid: publicForm.paid,
         category,
         preferred_side: publicForm.preferred_side,
         partner_user_id: publicForm.partner_member_id || null,
         partner_name: publicForm.partner_name || null,
+        partner_email: partnerEmail || null,
         partner_phone: publicForm.partner_phone || null,
         partner_paid: publicForm.partner_paid,
         partner_preferred_side: publicForm.partner_preferred_side,
@@ -433,8 +472,16 @@ function App() {
         playerName: publicForm.name,
         partnerName: publicForm.partner_name,
       });
-      setPublicForm(emptyPublicRegistration);
+      setPublicForm(authUser?.role === "jugador" ? {
+        ...emptyPublicRegistration,
+        name: authUser.name || "",
+        email: authUser.email || "",
+        phone: authUser.phone || "",
+        category: authUser.category || "5ta",
+        preferred_side: authUser.preferred_side || "indiferente",
+      } : emptyPublicRegistration);
       await loadBase();
+      await loadEventData(selectedEventId);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -571,6 +618,8 @@ function App() {
       success={registrationSuccess}
       setSuccess={setRegistrationSuccess}
       onSubmit={submitPublicRegistration}
+      loading={loading}
+      pairs={pairs}
     />
   ) : page === "signup" ? (
     <SignupPage
@@ -1877,7 +1926,7 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }
   );
 }
 
-function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, onSubmit }) {
+function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, onSubmit, loading, pairs }) {
   const [partnerMode, setPartnerMode] = useState("searching");
   const [partnerSource, setPartnerSource] = useState("member");
   const eventCategories = [
@@ -1891,6 +1940,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
   const selectedCategory = form.category || options[0] || "";
   const availableMembers = members.filter((member) => member.id !== authUser?.id);
   const selectedPartnerMember = availableMembers.find((member) => String(member.id) === String(form.partner_member_id));
+  const selectedEventPairs = pairs.filter((pair) => String(pair.event_id) === String(selectedEventId));
 
   function applyPartnerMember(memberId) {
     const member = availableMembers.find((item) => String(item.id) === String(memberId));
@@ -1898,6 +1948,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
       ...form,
       partner_member_id: memberId,
       partner_name: member?.name || "",
+      partner_email: "",
       partner_phone: member?.phone || "",
       partner_preferred_side: member?.preferred_side || "indiferente",
     });
@@ -1909,6 +1960,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
       ...form,
       partner_member_id: "",
       partner_name: "",
+      partner_email: "",
       partner_phone: "",
       partner_preferred_side: "indiferente",
     });
@@ -1992,6 +2044,17 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
               <input placeholder="Nombre y apellido" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </label>
             <label className="form-field">
+              <span>Email</span>
+              <input
+                type="email"
+                placeholder="correo@dominio.com"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                required
+                disabled={authUser?.role === "jugador"}
+              />
+            </label>
+            <label className="form-field">
               <span>Teléfono</span>
               <input placeholder="Opcional" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </label>
@@ -2017,7 +2080,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 className={!hasPartner ? "active" : ""}
                 onClick={() => {
                   setPartnerMode("searching");
-                  setForm({ ...form, partner_member_id: "", partner_name: "", partner_phone: "", partner_paid: false });
+                  setForm({ ...form, partner_member_id: "", partner_name: "", partner_email: "", partner_phone: "", partner_paid: false });
                 }}
               >
                 Busco partner
@@ -2033,7 +2096,10 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                   <button
                     type="button"
                     className={partnerSource === "member" ? "active" : ""}
-                    onClick={() => setPartnerSource("member")}
+                    onClick={() => {
+                      setPartnerSource("member");
+                      setForm({ ...form, partner_member_id: "", partner_name: "", partner_email: "", partner_phone: "", partner_preferred_side: "indiferente" });
+                    }}
                   >
                     Miembro registrado
                   </button>
@@ -2050,7 +2116,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                   <>
                     <label className="form-field wide-field">
                       <span>Seleccionar partner</span>
-                      <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)}>
+                      <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)} required={hasPartner && partnerSource === "member"}>
                         <option value="">Buscar en miembros registrados</option>
                         {availableMembers.map((member) => (
                           <option key={member.id} value={member.id}>
@@ -2072,7 +2138,17 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                   <>
                     <label className="form-field">
                       <span>Nombre partner</span>
-                      <input placeholder="Nombre y apellido" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} />
+                      <input placeholder="Nombre y apellido" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} required={hasPartner && partnerSource === "guest"} />
+                    </label>
+                    <label className="form-field">
+                      <span>Email partner</span>
+                      <input
+                        type="email"
+                        placeholder="correo@dominio.com"
+                        value={form.partner_email}
+                        onChange={(e) => setForm({ ...form, partner_email: e.target.value })}
+                        required={hasPartner && partnerSource === "guest"}
+                      />
                     </label>
                     <label className="form-field">
                       <span>Teléfono partner</span>
@@ -2115,8 +2191,8 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 </span>
               </label>
             )}
-            <button disabled={!selectedEventId || !form.name.trim() || (hasPartner && !form.partner_name.trim())}>
-              <UserPlus size={16} /> Confirmar inscripción
+            <button disabled={loading || !selectedEventId || !form.name.trim() || !form.email.trim() || (hasPartner && (!form.partner_name.trim() || (partnerSource === "guest" && !form.partner_email.trim())))}>
+              <UserPlus size={16} /> {loading ? "Registrando..." : "Confirmar inscripción"}
             </button>
           </form>
         </section>
@@ -2137,6 +2213,20 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
             <strong>{hasPartner ? (form.partner_name || "Pendiente") : "Buscando partner"}</strong>
             <small>{hasPartner ? (form.partner_paid ? "Pareja completa · pagado" : "Pareja completa · pago pendiente") : "Te anotamos individualmente"}</small>
           </div>
+          <section className="registered-list">
+            <div className="block-head">
+              <h2><ListChecks size={18} /> Inscritos</h2>
+              <span>{selectedEventPairs.length} parejas</span>
+            </div>
+            <div className="registered-list-items">
+              {selectedEventPairs.length ? selectedEventPairs.map((pair) => (
+                <div key={pair.id} className="registered-list-item">
+                  <strong>{pairName(pair)}</strong>
+                  <small>{pair.category} · {pair.status === "buscando_partner" ? "Buscando partner" : "Pareja completa"}</small>
+                </div>
+              )) : <p className="muted">Sin inscritos todavia</p>}
+            </div>
+          </section>
         </aside>
       </div>
     </section>

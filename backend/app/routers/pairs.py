@@ -9,6 +9,7 @@ from app.models.match import Match
 from app.models.payment import Payment
 from app.models.standing import Standing
 from app.models.player import EventPair, Player
+from app.registration_guard import ensure_different_players, ensure_not_registered
 from app.models.user import User
 from app.schemas.players import PairCreate, PairRead, PairUpdate
 from app.services import recalculate_standings
@@ -25,10 +26,18 @@ def create_pair(
 ) -> EventPair:
     if not db.get(Event, event_id):
         raise HTTPException(status_code=404, detail="Evento no encontrado")
-    if not db.get(Player, payload.player_one_id):
+    player_one = db.get(Player, payload.player_one_id)
+    if not player_one:
         raise HTTPException(status_code=404, detail="Jugador 1 no encontrado")
-    if payload.player_two_id and not db.get(Player, payload.player_two_id):
-        raise HTTPException(status_code=404, detail="Jugador 2 no encontrado")
+    player_two = None
+    if payload.player_two_id:
+        player_two = db.get(Player, payload.player_two_id)
+        if not player_two:
+            raise HTTPException(status_code=404, detail="Jugador 2 no encontrado")
+    ensure_different_players(player_one, player_two)
+    ensure_not_registered(db, event_id, player_one)
+    if player_two:
+        ensure_not_registered(db, event_id, player_two)
 
     pair = EventPair(event_id=event_id, **payload.model_dump())
     db.add(pair)
@@ -61,7 +70,19 @@ def update_pair(
     pair = db.scalar(select(EventPair).where(EventPair.id == pair_id, EventPair.event_id == event_id))
     if not pair:
         raise HTTPException(status_code=404, detail="Pareja no encontrada")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    next_player_one = db.get(Player, data.get("player_one_id", pair.player_one_id))
+    next_player_two_id = data.get("player_two_id", pair.player_two_id)
+    next_player_two = db.get(Player, next_player_two_id) if next_player_two_id else None
+    if not next_player_one:
+        raise HTTPException(status_code=404, detail="Jugador 1 no encontrado")
+    if next_player_two_id and not next_player_two:
+        raise HTTPException(status_code=404, detail="Jugador 2 no encontrado")
+    ensure_different_players(next_player_one, next_player_two)
+    ensure_not_registered(db, event_id, next_player_one, exclude_pair_id=pair_id)
+    if next_player_two:
+        ensure_not_registered(db, event_id, next_player_two, exclude_pair_id=pair_id)
+    for key, value in data.items():
         setattr(pair, key, value)
     db.commit()
     return _get_pair(db, pair_id)

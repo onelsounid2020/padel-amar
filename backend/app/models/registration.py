@@ -25,6 +25,7 @@ class EventRegistration(Base):
     __table_args__ = (
         UniqueConstraint("event_id", "player_id", name="uq_event_registration_player"),
         UniqueConstraint("event_id", "user_id", name="uq_event_registration_user"),
+        UniqueConstraint("event_id", "identity_key", name="uq_event_registration_identity"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -32,6 +33,7 @@ class EventRegistration(Base):
     pair_id: Mapped[int] = mapped_column(ForeignKey("event_pairs.id", ondelete="CASCADE"), nullable=False)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    identity_key: Mapped[str] = mapped_column(String(160), nullable=False)
     role: Mapped[RegistrationRole] = mapped_column(Enum(RegistrationRole), nullable=False)
     category: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[RegistrationStatus] = mapped_column(Enum(RegistrationStatus), default=RegistrationStatus.confirmada, nullable=False)

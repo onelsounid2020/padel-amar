@@ -10,6 +10,7 @@ from app.schemas.common import ORMModel
 
 class PlayerBase(BaseModel):
     name: str
+    email: str | None = None
     phone: str | None = None
     category: str
     preferred_side: PreferredSide | None = None
