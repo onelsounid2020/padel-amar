@@ -120,6 +120,15 @@ function pairName(pair) {
   return `${pair.player_one.name} / ${second}`;
 }
 
+function mergePlayersFromPairs(players, pairs) {
+  const byId = new Map(players.map((player) => [player.id, player]));
+  pairs.forEach((pair) => {
+    if (pair.player_one && !byId.has(pair.player_one.id)) byId.set(pair.player_one.id, pair.player_one);
+    if (pair.player_two && !byId.has(pair.player_two.id)) byId.set(pair.player_two.id, pair.player_two);
+  });
+  return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
 function pageFromLocation() {
   if (typeof window === "undefined") return "events";
   const view = new URLSearchParams(window.location.search).get("view");
@@ -293,7 +302,9 @@ function App() {
     api.me()
       .then(async (user) => {
         setAuthUser(user);
-        await loadPermissions(user);
+        const permissions = await loadPermissions(user);
+        await loadBase(user, permissions);
+        await loadEventData(selectedEventId, user, permissions);
       })
       .catch(() => setAuthToken(""));
   }, []);
@@ -1234,6 +1245,7 @@ function EventsPage(props) {
   const recommendedCourts = estimatedMatches ? Math.ceil(estimatedMatches / slotsPerCourt) : 0;
   const recommendedCourtsWithFinals = estimatedMatchesWithFinals ? Math.ceil(estimatedMatchesWithFinals / slotsPerCourt) : 0;
   const configuredCourts = Number(fixtureForm.court_count || 0);
+  const playerOptions = mergePlayersFromPairs(players, pairs);
 
   useEffect(() => {
     if (!selectedEvent) return;
@@ -1316,11 +1328,11 @@ function EventsPage(props) {
                 <form onSubmit={submitPair} className="compact-form">
                   <select value={pairForm.player_one_id} onChange={(e) => setPairForm({ ...pairForm, player_one_id: e.target.value })} required>
                     <option value="">Jugador 1</option>
-                    {players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                    {playerOptions.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
                   </select>
                   <select value={pairForm.player_two_id} onChange={(e) => setPairForm({ ...pairForm, player_two_id: e.target.value })}>
                     <option value="">Jugador 2 opcional</option>
-                    {players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                    {playerOptions.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
                   </select>
                   <CategorySelect value={pairForm.category} onChange={(value) => setPairForm({ ...pairForm, category: value })} />
                   <select value={pairForm.status} onChange={(e) => setPairForm({ ...pairForm, status: e.target.value })}>
@@ -1334,7 +1346,7 @@ function EventsPage(props) {
             </div>
 
             <div className="data-grid">
-                  <PairsBlock pairs={pairs} players={players} eventId={selectedEventId} onChange={run} />
+                  <PairsBlock pairs={pairs} players={playerOptions} eventId={selectedEventId} onChange={run} />
             </div>
 
             </>
