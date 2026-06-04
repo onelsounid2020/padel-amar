@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
@@ -226,12 +226,30 @@ function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(pageFromLocation);
+  const selectedEventIdRef = useRef(selectedEventId);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === Number(selectedEventId)),
     [events, selectedEventId],
   );
   const activeEvents = useMemo(() => events.filter(isEventActive), [events]);
+
+  function clearEventData() {
+    setPairs([]);
+    setPayments([]);
+    setMatches([]);
+    setResultSubmissions([]);
+    setStandings([]);
+    setRanking([]);
+    setWhatsapp("");
+  }
+
+  function selectEventId(nextEventId) {
+    const nextValue = nextEventId ? String(nextEventId) : "";
+    if (selectedEventIdRef.current !== nextValue) clearEventData();
+    selectedEventIdRef.current = nextValue;
+    setSelectedEventId(nextValue);
+  }
 
   function navigatePage(nextPage) {
     const paths = {
@@ -268,26 +286,32 @@ function App() {
     setMembers(memberData);
     if (!selectedEventId) {
       const nextEvent = eventsData.find(isEventActive) || eventsData[0];
-      if (nextEvent) setSelectedEventId(String(nextEvent.id));
+      if (nextEvent) selectEventId(nextEvent.id);
     }
   }
 
-  async function loadEventData(eventId = selectedEventId, userOverride = authUser, permissionOverride = currentPermissions) {
-    if (!eventId) return;
+  async function loadEventData(eventId, userOverride = authUser, permissionOverride = currentPermissions) {
+    const targetEventId = eventId || selectedEventIdRef.current;
+    if (!targetEventId) {
+      clearEventData();
+      return;
+    }
+    const requestedEventId = String(targetEventId);
     const effectiveUser = userOverride;
     const effectivePermissions = effectiveUser?.role === "superadmin"
       ? Object.fromEntries(fallbackPermissionModules.map((module) => [module.key, true]))
       : permissionOverride;
     const canLoadSubmissions = Boolean(effectiveUser);
     const [pairData, paymentData, matchData, submissionData, standingData, rankingData, whatsappData] = await Promise.all([
-      api.pairs(eventId),
-      effectiveUser && effectivePermissions.events ? api.payments(eventId) : Promise.resolve([]),
-      api.matches(eventId),
-      canLoadSubmissions ? api.resultSubmissions(eventId) : Promise.resolve([]),
-      api.standings(eventId),
-      api.finalRanking(eventId),
-      api.whatsapp(eventId),
+      api.pairs(requestedEventId),
+      effectiveUser && effectivePermissions.events ? api.payments(requestedEventId) : Promise.resolve([]),
+      api.matches(requestedEventId),
+      canLoadSubmissions ? api.resultSubmissions(requestedEventId) : Promise.resolve([]),
+      api.standings(requestedEventId),
+      api.finalRanking(requestedEventId),
+      api.whatsapp(requestedEventId),
     ]);
+    if (selectedEventIdRef.current !== requestedEventId) return;
     setPairs(pairData);
     setPayments(paymentData);
     setMatches(matchData);
@@ -345,6 +369,10 @@ function App() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    selectedEventIdRef.current = selectedEventId ? String(selectedEventId) : "";
+  }, [selectedEventId]);
 
   useEffect(() => {
     run(loadBase);
@@ -405,11 +433,11 @@ function App() {
   useEffect(() => {
     if (page === "events") return;
     if (!selectedEventId && activeEvents[0]) {
-      setSelectedEventId(String(activeEvents[0].id));
+      selectEventId(activeEvents[0].id);
       return;
     }
     if (selectedEvent && !isEventActive(selectedEvent)) {
-      setSelectedEventId(activeEvents[0] ? String(activeEvents[0].id) : "");
+      selectEventId(activeEvents[0]?.id || "");
     }
   }, [page, selectedEventId, selectedEvent?.id, selectedEvent?.is_active, activeEvents]);
 
@@ -442,10 +470,10 @@ function App() {
       };
       if (selectedEventId) {
         const updated = await api.updateEvent(selectedEventId, payload);
-        setSelectedEventId(String(updated.id));
+        selectEventId(updated.id);
       } else {
         const created = await api.createEvent(payload);
-        setSelectedEventId(String(created.id));
+        selectEventId(created.id);
         setEventForm(emptyEvent);
       }
     });
@@ -610,7 +638,7 @@ function App() {
           await api.deleteEvent(selectedEventId);
           const remainingEvents = await api.events();
           const nextEvent = remainingEvents.find(isEventActive) || remainingEvents[0];
-          setSelectedEventId(nextEvent ? String(nextEvent.id) : "");
+          selectEventId(nextEvent?.id || "");
           setEventForm(emptyEvent);
         });
       },
@@ -633,7 +661,7 @@ function App() {
             || eventsData.find((event) => String(event.id) !== String(selectedEventId))
             || null;
           setEvents(eventsData);
-          setSelectedEventId(nextEvent ? String(nextEvent.id) : "");
+          selectEventId(nextEvent?.id || "");
           await loadBase();
           if (nextEvent) await loadEventData(String(nextEvent.id));
         } catch (err) {
@@ -663,7 +691,7 @@ function App() {
           const eventsData = await api.events();
           const nextEvent = eventsData.find(isEventActive) || eventsData[0] || null;
           setEvents(eventsData);
-          setSelectedEventId(nextEvent ? String(nextEvent.id) : "");
+          selectEventId(nextEvent?.id || "");
           await loadBase();
           if (nextEvent) await loadEventData(String(nextEvent.id));
         } catch (err) {
@@ -801,7 +829,7 @@ function App() {
     <PublicRegistration
       events={activeEvents}
       selectedEventId={selectedEventId}
-      setSelectedEventId={setSelectedEventId}
+      setSelectedEventId={selectEventId}
       selectedEvent={selectedEvent}
       authUser={authUser}
       members={members}
@@ -840,7 +868,7 @@ function App() {
       standings={standings}
       authUser={authUser}
       selectedEventId={selectedEventId}
-      setSelectedEventId={setSelectedEventId}
+      setSelectedEventId={selectEventId}
       selectedEvent={selectedEvent}
       form={publicResultForm}
       setForm={setPublicResultForm}
@@ -854,7 +882,7 @@ function App() {
       resultSubmissions={resultSubmissions}
       standings={standings}
       selectedEventId={selectedEventId}
-      setSelectedEventId={setSelectedEventId}
+      setSelectedEventId={selectEventId}
       selectedEvent={selectedEvent}
       onSave={run}
       loading={loading}
@@ -896,7 +924,7 @@ function App() {
       ranking={ranking}
       selectedEvent={selectedEvent}
       selectedEventId={selectedEventId}
-      setSelectedEventId={setSelectedEventId}
+      setSelectedEventId={selectEventId}
       eventForm={eventForm}
       setEventForm={setEventForm}
       playerForm={playerForm}
@@ -928,6 +956,33 @@ function App() {
     /> : <AccessDenied moduleName="Eventos" />
   );
 
+  const appHeader = (
+    <header className="topbar">
+      <div>
+        <p className="eyebrow">Padel Manager</p>
+        <h1>Gestión de eventos</h1>
+      </div>
+      <div className="top-actions">
+        <nav className="app-nav" aria-label="Secciones">
+          {canAccess("events") && <button className={page === "events" ? "active" : ""} onClick={() => navigatePage("events")}>Eventos</button>}
+          {canAccess("register") && <button className={page === "register" ? "active" : ""} onClick={() => navigatePage("register")}>Registro</button>}
+          {canAccess("results") && <button className={page === "results" ? "active" : ""} onClick={() => navigatePage("results")}>Resultados</button>}
+          {canAccess("users") && (
+            <button className={page === "users" ? "active" : ""} onClick={() => navigatePage("users")}>Usuarios</button>
+          )}
+          {canAccess("profiles") && (
+            <button className={page === "profiles" ? "active" : ""} onClick={() => navigatePage("profiles")}>Perfiles</button>
+          )}
+          {canAccess("tablet") && <button className={page === "tablet" ? "active" : ""} onClick={() => navigatePage("tablet")}>Tablet</button>}
+        </nav>
+        <button className="icon-button" onClick={() => run(loadBase)} disabled={loading} title="Actualizar">
+          <RefreshCw size={18} />
+        </button>
+        {authUser && <button className="secondary-action" type="button" onClick={logout}>Salir</button>}
+      </div>
+    </header>
+  );
+
   if (page === "tablet") {
     if (!authUser) {
       return (
@@ -939,6 +994,7 @@ function App() {
     }
     return (
       <main className="tablet-shell">
+        {appHeader}
         {error && <div className="alert tablet-alert">{error}</div>}
         {canAccess("tablet") ? pageContent : <AccessDenied moduleName="Tablet" />}
       </main>
@@ -956,30 +1012,7 @@ function App() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Padel Manager</p>
-          <h1>Gestión de eventos</h1>
-        </div>
-        <div className="top-actions">
-          <nav className="app-nav" aria-label="Secciones">
-            {canAccess("events") && <button className={page === "events" ? "active" : ""} onClick={() => navigatePage("events")}>Eventos</button>}
-            {canAccess("register") && <button className={page === "register" ? "active" : ""} onClick={() => navigatePage("register")}>Registro</button>}
-            {canAccess("results") && <button className={page === "results" ? "active" : ""} onClick={() => navigatePage("results")}>Resultados</button>}
-            {canAccess("users") && (
-              <button className={page === "users" ? "active" : ""} onClick={() => navigatePage("users")}>Usuarios</button>
-            )}
-            {canAccess("profiles") && (
-              <button className={page === "profiles" ? "active" : ""} onClick={() => navigatePage("profiles")}>Perfiles</button>
-            )}
-            {canAccess("tablet") && <button className={page === "tablet" ? "active" : ""} onClick={() => navigatePage("tablet")}>Tablet</button>}
-          </nav>
-          <button className="icon-button" onClick={() => run(loadBase)} disabled={loading} title="Actualizar">
-            <RefreshCw size={18} />
-          </button>
-          {authUser && <button className="secondary-action" type="button" onClick={logout}>Salir</button>}
-        </div>
-      </header>
+      {appHeader}
 
       {error && <div className="alert">{error}</div>}
       <ConfirmModal dialog={confirmDialog} setDialog={setConfirmDialog} loading={loading} />
