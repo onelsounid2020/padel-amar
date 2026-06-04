@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import current_user
 from app.database import get_db
 from app.models.event import Event
 from app.models.payment import PaymentStatus, PlayerPayment
@@ -35,14 +36,25 @@ def list_members(db: Session = Depends(get_db)) -> list[User]:
 
 
 @router.post("/events/{event_id}/registrations", response_model=PublicRegistrationResponse, status_code=201)
-def register_player(event_id: int, payload: PublicRegistrationRequest, db: Session = Depends(get_db)) -> PublicRegistrationResponse:
+def register_player(
+    event_id: int,
+    payload: PublicRegistrationRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> PublicRegistrationResponse:
     event = db.get(Event, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if user.role != UserRole.jugador:
+        raise HTTPException(status_code=403, detail="Debes entrar con una cuenta de jugador para inscribirte")
+    if payload.player_user_id and payload.player_user_id != user.id:
+        raise HTTPException(status_code=403, detail="No puedes inscribir a otro jugador desde esta cuenta")
+    if payload.partner_name and payload.partner_name.strip() and not payload.partner_user_id:
+        raise HTTPException(status_code=400, detail="El partner debe tener cuenta de jugador")
 
     player_one = _player_for_registration(
         db,
-        user_id=payload.player_user_id,
+        user_id=user.id,
         name=payload.name,
         email=payload.email,
         phone=payload.phone,

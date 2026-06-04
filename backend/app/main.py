@@ -8,7 +8,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.auth import ensure_default_admin
-from app.models import Event, EventPair, EventRegistration, Match, Payment, Player, Standing
+from app.models import Event, EventPair, EventRegistration, Match, MatchResultSubmission, Payment, Player, Standing
 from app.routers import auth, events, matches, pairs, payments, players, public, standings
 
 logger = logging.getLogger("amar.database")
@@ -33,6 +33,8 @@ def ensure_local_schema() -> None:
     with engine.begin() as connection:
         if "category_configs" not in columns:
             connection.execute(text("ALTER TABLE events ADD COLUMN category_configs JSON DEFAULT '[]'"))
+        if "ranking_config" not in columns:
+            connection.execute(text("ALTER TABLE events ADD COLUMN ranking_config JSON DEFAULT '{}'"))
         if "users" in table_names:
             user_columns = {column["name"] for column in inspector.get_columns("users")}
             if "phone" not in user_columns:

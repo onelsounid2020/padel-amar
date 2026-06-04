@@ -19,6 +19,7 @@ class Event(Base):
     capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     tournament_type: Mapped[str] = mapped_column(String(80), nullable=False)
     category_configs: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    ranking_config: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

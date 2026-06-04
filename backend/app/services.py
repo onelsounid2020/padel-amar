@@ -1,10 +1,35 @@
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.models.event import Event
 from app.models.match import Match
 from app.models.payment import Payment, PaymentStatus, PlayerPayment
 from app.models.player import EventPair, PairStatus
 from app.models.standing import Standing
+
+DEFAULT_RANKING_CONFIG = {
+    "win_points": 3,
+    "draw_points": 1,
+    "loss_points": 0,
+    "tiebreakers": ["points", "won", "difference", "points_for"],
+}
+
+RANKING_VALUE_GETTERS = {
+    "points": lambda standing: standing.points,
+    "won": lambda standing: standing.won,
+    "difference": lambda standing: standing.points_for - standing.points_against,
+    "points_for": lambda standing: standing.points_for,
+    "played": lambda standing: standing.played,
+}
+
+
+def ranking_config_for_event(event: Event | None) -> dict:
+    config = {**DEFAULT_RANKING_CONFIG, **((event.ranking_config or {}) if event else {})}
+    tiebreakers = [key for key in config.get("tiebreakers", []) if key in RANKING_VALUE_GETTERS]
+    if not tiebreakers:
+        tiebreakers = DEFAULT_RANKING_CONFIG["tiebreakers"]
+    config["tiebreakers"] = tiebreakers
+    return config
 
 
 def normalize_matchup(pair_one_id: int, pair_two_id: int) -> tuple[int, int]:
@@ -515,6 +540,12 @@ def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
     db.execute(delete(Standing).where(Standing.event_id == event_id))
     db.flush()
 
+    event = db.get(Event, event_id)
+    ranking_config = ranking_config_for_event(event)
+    win_points = int(ranking_config["win_points"])
+    draw_points = int(ranking_config["draw_points"])
+    loss_points = int(ranking_config["loss_points"])
+
     pairs = db.scalars(select(EventPair).where(EventPair.event_id == event_id)).all()
     by_pair = {
         pair.id: Standing(
@@ -555,14 +586,16 @@ def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
         if match.winner_pair_id == match.pair_one_id:
             one.won += 1
             two.lost += 1
-            one.points += 3
+            one.points += win_points
+            two.points += loss_points
         elif match.winner_pair_id == match.pair_two_id:
             two.won += 1
             one.lost += 1
-            two.points += 3
+            two.points += win_points
+            one.points += loss_points
         else:
-            one.points += 1
-            two.points += 1
+            one.points += draw_points
+            two.points += draw_points
 
     standings_by_category: dict[str, list[Standing]] = {}
     pair_by_id = {pair.id: pair for pair in pairs}
@@ -575,7 +608,7 @@ def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
     for category in sorted(standings_by_category):
         category_standings = sorted(
             standings_by_category[category],
-            key=lambda item: (item.points, item.won, item.points_for - item.points_against, item.points_for),
+            key=lambda item: tuple(RANKING_VALUE_GETTERS[key](item) for key in ranking_config["tiebreakers"]),
             reverse=True,
         )
         for index, standing in enumerate(category_standings, start=1):

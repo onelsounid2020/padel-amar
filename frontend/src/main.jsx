@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AlertCircle,
   CalendarPlus,
   Clipboard,
   CreditCard,
@@ -13,8 +14,9 @@ import {
   Swords,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
-import { api, setAuthToken } from "./api/client";
+import { ApiError, api, setAuthToken } from "./api/client";
 import { pairName } from "./lib/pairs";
 import { TabletResults } from "./pages/TabletResults";
 import "./styles.css";
@@ -29,9 +31,25 @@ const emptyEvent = {
   capacity: 16,
   tournament_type: "Americano",
   category_configs: [],
+  ranking_config: {},
   description: "",
   is_active: true,
 };
+
+const defaultRankingConfig = {
+  win_points: 3,
+  draw_points: 1,
+  loss_points: 0,
+  tiebreakers: ["points", "won", "difference", "points_for"],
+};
+
+const rankingTiebreakerOptions = [
+  { value: "points", label: "Puntos" },
+  { value: "won", label: "Partidos ganados" },
+  { value: "difference", label: "Diferencia" },
+  { value: "points_for", label: "Juegos a favor" },
+  { value: "played", label: "Partidos jugados" },
+];
 
 const emptyPlayer = { name: "", phone: "", category: "", preferred_side: "indiferente" };
 const emptyPublicRegistration = {
@@ -139,6 +157,22 @@ function pageFromLocation() {
   return "events";
 }
 
+function isEventActive(event) {
+  return event.is_active !== false;
+}
+
+function todayDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isPastEvent(event) {
+  return Boolean(event.date) && event.date < todayDateString();
+}
+
 function App() {
   const [dashboard, setDashboard] = useState([]);
   const [events, setEvents] = useState([]);
@@ -146,6 +180,7 @@ function App() {
   const [pairs, setPairs] = useState([]);
   const [payments, setPayments] = useState([]);
   const [matches, setMatches] = useState([]);
+  const [resultSubmissions, setResultSubmissions] = useState([]);
   const [standings, setStandings] = useState([]);
   const [ranking, setRanking] = useState([]);
   const [users, setUsers] = useState([]);
@@ -165,10 +200,14 @@ function App() {
     set_minutes: 20,
     start_time: "17:00",
   });
+  const [rankingConfigForm, setRankingConfigForm] = useState(defaultRankingConfig);
   const [resultForm, setResultForm] = useState({});
   const [publicForm, setPublicForm] = useState(emptyPublicRegistration);
   const [publicResultForm, setPublicResultForm] = useState(emptyPublicResult);
   const [registrationSuccess, setRegistrationSuccess] = useState(null);
+  const [registrationNotice, setRegistrationNotice] = useState(null);
+  const [signupNotice, setSignupNotice] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [whatsapp, setWhatsapp] = useState("");
   const [authUser, setAuthUser] = useState(null);
   const [currentPermissions, setCurrentPermissions] = useState(publicPermissions);
@@ -192,6 +231,7 @@ function App() {
     () => events.find((event) => event.id === Number(selectedEventId)),
     [events, selectedEventId],
   );
+  const activeEvents = useMemo(() => events.filter(isEventActive), [events]);
 
   function navigatePage(nextPage) {
     const paths = {
@@ -226,7 +266,10 @@ function App() {
     setPlayers(playersData);
     setUsers(userData);
     setMembers(memberData);
-    if (!selectedEventId && eventsData[0]) setSelectedEventId(String(eventsData[0].id));
+    if (!selectedEventId) {
+      const nextEvent = eventsData.find(isEventActive) || eventsData[0];
+      if (nextEvent) setSelectedEventId(String(nextEvent.id));
+    }
   }
 
   async function loadEventData(eventId = selectedEventId, userOverride = authUser, permissionOverride = currentPermissions) {
@@ -235,10 +278,12 @@ function App() {
     const effectivePermissions = effectiveUser?.role === "superadmin"
       ? Object.fromEntries(fallbackPermissionModules.map((module) => [module.key, true]))
       : permissionOverride;
-    const [pairData, paymentData, matchData, standingData, rankingData, whatsappData] = await Promise.all([
+    const canLoadSubmissions = Boolean(effectiveUser);
+    const [pairData, paymentData, matchData, submissionData, standingData, rankingData, whatsappData] = await Promise.all([
       api.pairs(eventId),
       effectiveUser && effectivePermissions.events ? api.payments(eventId) : Promise.resolve([]),
       api.matches(eventId),
+      canLoadSubmissions ? api.resultSubmissions(eventId) : Promise.resolve([]),
       api.standings(eventId),
       api.finalRanking(eventId),
       api.whatsapp(eventId),
@@ -246,6 +291,7 @@ function App() {
     setPairs(pairData);
     setPayments(paymentData);
     setMatches(matchData);
+    setResultSubmissions(submissionData);
     setStandings(standingData);
     setRanking(rankingData);
     setWhatsapp(whatsappData.text);
@@ -275,6 +321,15 @@ function App() {
       setRolePermissions(rolePermissionsData);
     }
     return permissionData;
+  }
+
+  function confirmAction(dialog) {
+    setConfirmDialog({
+      tone: "default",
+      confirmLabel: "Confirmar",
+      cancelLabel: "Cancelar",
+      ...dialog,
+    });
   }
 
   async function run(action) {
@@ -348,6 +403,17 @@ function App() {
   }, [selectedEventId]);
 
   useEffect(() => {
+    if (page === "events") return;
+    if (!selectedEventId && activeEvents[0]) {
+      setSelectedEventId(String(activeEvents[0].id));
+      return;
+    }
+    if (selectedEvent && !isEventActive(selectedEvent)) {
+      setSelectedEventId(activeEvents[0] ? String(activeEvents[0].id) : "");
+    }
+  }, [page, selectedEventId, selectedEvent?.id, selectedEvent?.is_active, activeEvents]);
+
+  useEffect(() => {
     function handlePopState() {
       setPage(pageFromLocation());
     }
@@ -372,6 +438,7 @@ function App() {
             qualifiers_per_group: Number(config.qualifiers_per_group || 0),
             notes: config.notes || "",
           })),
+        ranking_config: eventForm.ranking_config || rankingConfigForm || defaultRankingConfig,
       };
       if (selectedEventId) {
         const updated = await api.updateEvent(selectedEventId, payload);
@@ -441,13 +508,18 @@ function App() {
     event.preventDefault();
     setError("");
     setRegistrationSuccess(null);
+    setRegistrationNotice(null);
 
     const playerEmail = (authUser?.role === "jugador" ? authUser.email : publicForm.email).trim().toLowerCase();
     const partnerEmail = publicForm.partner_email.trim().toLowerCase();
-    const comesWithPartner = Boolean(publicForm.partner_member_id || publicForm.partner_name.trim());
+    const comesWithPartner = Boolean(publicForm.partner_member_id);
 
     if (!selectedEventId) {
       setError("Selecciona un evento para inscribirte.");
+      return;
+    }
+    if (authUser?.role !== "jugador") {
+      setError("Debes entrar con una cuenta de jugador para inscribirte.");
       return;
     }
     if (!publicForm.name.trim()) {
@@ -456,18 +528,6 @@ function App() {
     }
     if (!isValidEmail(playerEmail)) {
       setError("Ingresa un email valido para el jugador.");
-      return;
-    }
-    if (comesWithPartner && !publicForm.partner_member_id && !publicForm.partner_name.trim()) {
-      setError("Ingresa el nombre del partner o selecciona un miembro registrado.");
-      return;
-    }
-    if (comesWithPartner && !publicForm.partner_member_id && !isValidEmail(partnerEmail)) {
-      setError("Ingresa un email valido para el partner.");
-      return;
-    }
-    if (comesWithPartner && !publicForm.partner_member_id && partnerEmail === playerEmail) {
-      setError("El partner debe tener un email distinto al jugador.");
       return;
     }
 
@@ -513,6 +573,14 @@ function App() {
       await loadBase();
       await loadEventData(selectedEventId);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setRegistrationNotice({
+          title: "Ya existe una inscripción",
+          message: err.message || "Uno de los jugadores ya está inscrito en este evento.",
+          eventName: selectedEvent?.name || "este evento",
+        });
+        return;
+      }
       setError(err.message);
     } finally {
       setLoading(false);
@@ -522,7 +590,7 @@ function App() {
   async function submitPublicResult(event) {
     event.preventDefault();
     await run(async () => {
-      await api.registerResult(selectedEventId, publicResultForm.match_id, {
+      await api.submitResult(selectedEventId, publicResultForm.match_id, {
         pair_one_score: Number(publicResultForm.pair_one_score),
         pair_two_score: Number(publicResultForm.pair_two_score),
       });
@@ -532,13 +600,86 @@ function App() {
 
   async function deleteSelectedEvent() {
     if (!selectedEventId || !selectedEvent) return;
-    const confirmed = window.confirm(`Eliminar "${selectedEvent.name}"? Se borraran parejas, pagos, partidos, resultados y ranking de este evento.`);
-    if (!confirmed) return;
+    confirmAction({
+      tone: "danger",
+      title: "Eliminar evento",
+      message: `Se borrará "${selectedEvent.name}" junto con sus parejas, pagos, partidos, resultados y ranking.`,
+      confirmLabel: "Eliminar evento",
+      onConfirm: async () => {
+        await run(async () => {
+          await api.deleteEvent(selectedEventId);
+          const remainingEvents = await api.events();
+          const nextEvent = remainingEvents.find(isEventActive) || remainingEvents[0];
+          setSelectedEventId(nextEvent ? String(nextEvent.id) : "");
+          setEventForm(emptyEvent);
+        });
+      },
+    });
+  }
+
+  async function closeSelectedEvent() {
+    if (!selectedEventId || !selectedEvent) return;
+    confirmAction({
+      title: "Cerrar evento",
+      message: `"${selectedEvent.name}" dejará de aparecer en Registro, Resultados y los selectores principales. Sus datos quedarán guardados.`,
+      confirmLabel: "Cerrar evento",
+      onConfirm: async () => {
+        setLoading(true);
+        setError("");
+        try {
+          await api.updateEvent(selectedEventId, { is_active: false });
+          const eventsData = await api.events();
+          const nextEvent = eventsData.find((event) => isEventActive(event) && String(event.id) !== String(selectedEventId))
+            || eventsData.find((event) => String(event.id) !== String(selectedEventId))
+            || null;
+          setEvents(eventsData);
+          setSelectedEventId(nextEvent ? String(nextEvent.id) : "");
+          await loadBase();
+          if (nextEvent) await loadEventData(String(nextEvent.id));
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+  }
+
+  async function closePastEvents() {
+    const pastActiveEvents = events.filter((event) => isEventActive(event) && isPastEvent(event));
+    if (!pastActiveEvents.length) {
+      setError("No hay eventos pasados activos para cerrar.");
+      return;
+    }
+    confirmAction({
+      title: "Cerrar eventos pasados",
+      message: `${pastActiveEvents.length} evento(s) pasado(s) dejarán de aparecer en Registro, Resultados y los selectores principales.`,
+      confirmLabel: "Cerrar pasados",
+      onConfirm: async () => {
+        setLoading(true);
+        setError("");
+        try {
+          await Promise.all(pastActiveEvents.map((event) => api.updateEvent(event.id, { is_active: false })));
+          const eventsData = await api.events();
+          const nextEvent = eventsData.find(isEventActive) || eventsData[0] || null;
+          setEvents(eventsData);
+          setSelectedEventId(nextEvent ? String(nextEvent.id) : "");
+          await loadBase();
+          if (nextEvent) await loadEventData(String(nextEvent.id));
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+  }
+
+  async function submitRankingConfig(config) {
+    if (!selectedEventId) return;
     await run(async () => {
-      await api.deleteEvent(selectedEventId);
-      const remainingEvents = await api.events();
-      setSelectedEventId(remainingEvents[0] ? String(remainingEvents[0].id) : "");
-      setEventForm(emptyEvent);
+      await api.updateEvent(selectedEventId, { ranking_config: config });
+      await api.recalculateStandings(selectedEventId);
     });
   }
 
@@ -553,6 +694,7 @@ function App() {
       const permissionData = await loadPermissions(response.user);
       await loadBase(response.user, permissionData);
       await loadEventData(selectedEventId, response.user, permissionData);
+      if (response.user.role === "jugador") navigatePage("register");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -564,6 +706,7 @@ function App() {
     event.preventDefault();
     setLoading(true);
     setError("");
+    setSignupNotice(null);
     try {
       const response = await api.registerPlayer({
         ...signupForm,
@@ -575,12 +718,25 @@ function App() {
       setPublicForm({
         ...emptyPublicRegistration,
         name: response.user.name,
+        email: response.user.email || "",
         phone: response.user.phone || "",
         category: response.user.category || signupForm.category,
         preferred_side: response.user.preferred_side || "indiferente",
       });
-      navigatePage("register");
+      setSignupNotice({
+        type: "success",
+        title: "Perfil creado",
+        message: `${response.user.name} ya tiene su perfil jugador listo.`,
+      });
     } catch (err) {
+      if (err instanceof ApiError && err.status === 400 && err.message.toLowerCase().includes("email")) {
+        setSignupNotice({
+          type: "duplicate",
+          title: "Ese email ya existe",
+          message: "Ya hay una cuenta creada con ese correo. Usa el acceso existente o prueba con otro email.",
+        });
+        return;
+      }
       setError(err.message);
     } finally {
       setLoading(false);
@@ -618,10 +774,16 @@ function App() {
   }
 
   async function deleteUser(user) {
-    const confirmed = window.confirm(`Eliminar usuario "${user.name}"?`);
-    if (!confirmed) return;
-    await run(async () => {
-      await api.deleteUser(user.id);
+    confirmAction({
+      tone: "danger",
+      title: "Eliminar usuario",
+      message: `Se eliminará la cuenta de "${user.name}".`,
+      confirmLabel: "Eliminar usuario",
+      onConfirm: async () => {
+        await run(async () => {
+          await api.deleteUser(user.id);
+        });
+      },
     });
   }
 
@@ -637,7 +799,7 @@ function App() {
 
   const pageContent = page === "register" ? (
     <PublicRegistration
-      events={events}
+      events={activeEvents}
       selectedEventId={selectedEventId}
       setSelectedEventId={setSelectedEventId}
       selectedEvent={selectedEvent}
@@ -647,9 +809,13 @@ function App() {
       setForm={setPublicForm}
       success={registrationSuccess}
       setSuccess={setRegistrationSuccess}
+      notice={registrationNotice}
+      setNotice={setRegistrationNotice}
       onSubmit={submitPublicRegistration}
       loading={loading}
       pairs={pairs}
+      goSignup={() => navigatePage("signup")}
+      goLogin={() => navigatePage("events")}
     />
   ) : page === "signup" ? (
     <SignupPage
@@ -657,14 +823,22 @@ function App() {
       setForm={setSignupForm}
       onSubmit={submitSignup}
       loading={loading}
+      notice={signupNotice}
+      setNotice={setSignupNotice}
+      goRegister={() => {
+        setSignupNotice(null);
+        navigatePage("register");
+      }}
       goLogin={() => navigatePage("events")}
     />
   ) : page === "results" ? (
     <PublicResults
-      events={events}
+      events={activeEvents}
       pairs={pairs}
       matches={matches}
+      resultSubmissions={resultSubmissions}
       standings={standings}
+      authUser={authUser}
       selectedEventId={selectedEventId}
       setSelectedEventId={setSelectedEventId}
       selectedEvent={selectedEvent}
@@ -674,9 +848,10 @@ function App() {
     />
   ) : page === "tablet" ? (
     <TabletResults
-      events={events}
+      events={activeEvents}
       pairs={pairs}
       matches={matches}
+      resultSubmissions={resultSubmissions}
       standings={standings}
       selectedEventId={selectedEventId}
       setSelectedEventId={setSelectedEventId}
@@ -734,6 +909,8 @@ function App() {
       setFixtureForm={setFixtureForm}
       resultForm={resultForm}
       setResultForm={setResultForm}
+      rankingConfigForm={rankingConfigForm}
+      setRankingConfigForm={setRankingConfigForm}
       whatsapp={whatsapp}
       submitEvent={submitEvent}
       submitPlayer={submitPlayer}
@@ -741,7 +918,11 @@ function App() {
       submitMatch={submitMatch}
       submitGenerateFixture={submitGenerateFixture}
       submitGenerateBracket={submitGenerateBracket}
+      submitRankingConfig={submitRankingConfig}
       deleteSelectedEvent={deleteSelectedEvent}
+      closeSelectedEvent={closeSelectedEvent}
+      closePastEvents={closePastEvents}
+      confirmAction={confirmAction}
       authUser={authUser}
       run={run}
     /> : <AccessDenied moduleName="Eventos" />
@@ -801,6 +982,7 @@ function App() {
       </header>
 
       {error && <div className="alert">{error}</div>}
+      <ConfirmModal dialog={confirmDialog} setDialog={setConfirmDialog} loading={loading} />
 
       <section className="metrics">
         {dashboard.map((event) => (
@@ -818,13 +1000,58 @@ function App() {
   );
 }
 
+function ConfirmModal({ dialog, setDialog, loading }) {
+  useEffect(() => {
+    if (!dialog) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === "Escape" && !loading) setDialog(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [dialog, loading, setDialog]);
+
+  if (!dialog) return null;
+
+  async function confirm() {
+    await dialog.onConfirm();
+    setDialog(null);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={() => !loading && setDialog(null)}>
+      <div className={`registration-modal confirm-modal ${dialog.tone === "danger" ? "danger" : ""}`} role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <button type="button" className="modal-close" onClick={() => setDialog(null)} aria-label="Cerrar aviso" disabled={loading}>
+          <X size={18} />
+        </button>
+        <div className={`modal-icon ${dialog.tone === "danger" ? "danger" : ""}`}>
+          <AlertCircle size={24} />
+        </div>
+        <div>
+          <p className="eyebrow">Confirmación</p>
+          <h2 id="confirm-modal-title">{dialog.title}</h2>
+          <p>{dialog.message}</p>
+          {dialog.detail && <small>{dialog.detail}</small>}
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="secondary-action" onClick={() => setDialog(null)} disabled={loading}>
+            {dialog.cancelLabel}
+          </button>
+          <button type="button" className={dialog.tone === "danger" ? "danger-action" : ""} onClick={confirm} disabled={loading}>
+            {loading ? "Procesando..." : dialog.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoginPage({ form, setForm, onSubmit, loading, compact = false }) {
   return (
     <section className={compact ? "login-page compact" : "login-page"}>
       <div className="login-card">
         <p className="eyebrow">Acceso AmarPadel</p>
-        <h1>{compact ? "Acceso operador" : "Panel administrativo"}</h1>
-        <p>Ingresa con una cuenta autorizada para administrar eventos, pagos, parejas o resultados.</p>
+        <h1>{compact ? "Acceso operador" : "Entra a tu cuenta"}</h1>
+        <p>{compact ? "Ingresa con una cuenta autorizada para cargar resultados." : "Usa tu cuenta jugador o administrativa para continuar."}</p>
         <form onSubmit={onSubmit} className="login-form" autoComplete="off">
           <label className="form-field">
             <span>Email</span>
@@ -855,59 +1082,127 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false }) {
   );
 }
 
-function SignupPage({ form, setForm, onSubmit, loading, goLogin }) {
+function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goRegister, goLogin }) {
+  useEffect(() => {
+    if (!notice) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setNotice(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [notice, setNotice]);
+
   return (
     <section className="signup-page">
-      <div className="signup-card">
-        <div className="registration-title">
-          <p className="eyebrow">Perfil jugador</p>
-          <h2>Crea tu cuenta</h2>
-          <p>Guarda tus datos para inscribirte más rápido y ver tus estadísticas cuando activemos el perfil.</p>
+      {notice && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setNotice(null)}>
+          <div className="registration-modal" role="dialog" aria-modal="true" aria-labelledby="signup-notice-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setNotice(null)} aria-label="Cerrar aviso">
+              <X size={18} />
+            </button>
+            <div className={`modal-icon ${notice.type === "success" ? "success" : ""}`}>
+              {notice.type === "success" ? <Check size={24} /> : <AlertCircle size={24} />}
+            </div>
+            <div>
+              <p className="eyebrow">Perfil jugador</p>
+              <h2 id="signup-notice-title">{notice.title}</h2>
+              <p>{notice.message}</p>
+              {notice.type === "success" ? (
+                <small>Ahora puedes inscribirte a un evento usando tus datos guardados.</small>
+              ) : (
+                <small>Si ya tienes cuenta, entra con tus credenciales para continuar.</small>
+              )}
+            </div>
+            <div className="modal-actions">
+              {notice.type === "success" ? (
+                <button type="button" onClick={goRegister}>Continuar al registro</button>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setNotice(null)}>Cambiar email</button>
+                  <button type="button" className="secondary-action" onClick={goLogin}>Ir al acceso</button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
-        <form onSubmit={onSubmit} className="signup-form">
-          <label className="form-field">
-            <span>Nombre</span>
-            <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Nombre y apellido" required />
-          </label>
-          <label className="form-field">
-            <span>Email</span>
-            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
-          </label>
-          <label className="form-field">
-            <span>Contraseña</span>
-            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
-          </label>
-          <label className="form-field">
-            <span>Teléfono</span>
-            <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Opcional" />
-          </label>
-          <label className="form-field">
-            <span>Categoría habitual</span>
-            <CategorySelect value={form.category} onChange={(category) => setForm({ ...form, category })} />
-          </label>
-          <label className="form-field">
-            <span>Lado preferido</span>
-            <select value={form.preferred_side} onChange={(event) => setForm({ ...form, preferred_side: event.target.value })}>
-              <option value="drive">Drive</option>
-              <option value="reves">Revés</option>
-              <option value="indiferente">Indiferente</option>
-            </select>
-          </label>
-          <button disabled={loading}>Crear perfil y continuar</button>
-        </form>
-        <button type="button" className="secondary-action" onClick={goLogin}>Ya tengo cuenta administrativa</button>
+      )}
+      <div className="signup-shell">
+        <aside className="signup-intro">
+          <p className="eyebrow">Miembros AMAR</p>
+          <h2>Tu perfil jugador</h2>
+          <p>Una cuenta por jugador mantiene las inscripciones limpias, evita duplicados y deja tus datos listos para cada evento.</p>
+          <div className="signup-benefits">
+            <span>Inscripción rápida</span>
+            <span>Partner registrado</span>
+            <span>Menos datos repetidos</span>
+          </div>
+        </aside>
+        <div className="signup-card">
+          <div className="signup-card-head">
+            <p className="eyebrow">Crear cuenta</p>
+            <h2>Datos del jugador</h2>
+            <p>Completa tu perfil una vez y úsalo para inscribirte.</p>
+          </div>
+          <form onSubmit={onSubmit} className="signup-form">
+            <label className="form-field">
+              <span>Nombre</span>
+              <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Nombre y apellido" required />
+            </label>
+            <label className="form-field">
+              <span>Email</span>
+              <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
+            </label>
+            <label className="form-field">
+              <span>Contraseña</span>
+              <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+            </label>
+            <label className="form-field">
+              <span>Teléfono</span>
+              <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Opcional" />
+            </label>
+            <label className="form-field">
+              <span>Categoría habitual</span>
+              <CategorySelect value={form.category} onChange={(category) => setForm({ ...form, category })} />
+            </label>
+            <label className="form-field">
+              <span>Lado preferido</span>
+              <select value={form.preferred_side} onChange={(event) => setForm({ ...form, preferred_side: event.target.value })}>
+                <option value="drive">Drive</option>
+                <option value="reves">Revés</option>
+                <option value="indiferente">Indiferente</option>
+              </select>
+            </label>
+            <button disabled={loading}>Crear perfil y continuar</button>
+          </form>
+          <button type="button" className="secondary-action" onClick={goLogin}>Ya tengo cuenta</button>
+        </div>
       </div>
     </section>
   );
 }
 
-function PublicResults({ events, pairs, matches, standings, selectedEventId, setSelectedEventId, selectedEvent, form, setForm, onSubmit }) {
-  const roundNames = [...new Set(matches.map((match) => match.round_name || "Grupo"))];
+function pairHasUser(pair, userId) {
+  return Boolean(pair && userId && (
+    pair.player_one?.user_id === userId || pair.player_two?.user_id === userId
+  ));
+}
+
+function PublicResults({ events, pairs, matches, resultSubmissions, standings, authUser, selectedEventId, setSelectedEventId, selectedEvent, form, setForm, onSubmit }) {
+  const userMatches = authUser?.role === "jugador"
+    ? matches.filter((match) => {
+      const one = pairs.find((pair) => pair.id === match.pair_one_id);
+      const two = pairs.find((pair) => pair.id === match.pair_two_id);
+      return pairHasUser(one, authUser.id) || pairHasUser(two, authUser.id);
+    })
+    : [];
+  const roundNames = [...new Set(userMatches.map((match) => match.round_name || "Grupo"))];
   const activeRound = form.round_name || roundNames[0] || "";
-  const visibleMatches = activeRound ? matches.filter((match) => (match.round_name || "Grupo") === activeRound) : matches;
+  const visibleMatches = activeRound ? userMatches.filter((match) => (match.round_name || "Grupo") === activeRound) : userMatches;
   const selectedMatch = visibleMatches.find((match) => match.id === Number(form.match_id));
+  const selectedSubmission = selectedMatch ? resultSubmissions.find((submission) => submission.match_id === selectedMatch.id && submission.submitted_by_user_id === authUser?.id) : null;
   const pairOne = selectedMatch ? pairs.find((pair) => pair.id === selectedMatch.pair_one_id) : null;
   const pairTwo = selectedMatch ? pairs.find((pair) => pair.id === selectedMatch.pair_two_id) : null;
+  const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
   const standingsByCategory = standings.reduce((groups, standing) => {
     const category = standing.pair.category || "Sin categoria";
     groups[category] = [...(groups[category] || []), standing];
@@ -919,7 +1214,7 @@ function PublicResults({ events, pairs, matches, standings, selectedEventId, set
       <div className="public-hero results-hero">
         <p className="eyebrow">Carga de resultados</p>
         <h2>Anotar marcador del partido</h2>
-        <p>Selecciona el evento, el partido correspondiente y guarda el resultado para actualizar la tabla automáticamente.</p>
+        <p>Solo puedes reportar resultados de tus partidos. Si otro jugador reporta algo distinto, la mesa verá una alerta.</p>
       </div>
 
       <div className="public-grid">
@@ -941,6 +1236,17 @@ function PublicResults({ events, pairs, matches, standings, selectedEventId, set
 
         <section className="panel">
           <h2><FileCheck2 size={18} /> Resultado</h2>
+          {authUser?.role !== "jugador" ? (
+            <div className="result-state-card">
+              <strong>Cuenta jugador requerida</strong>
+              <span>Entra con tu cuenta jugador para reportar solo tus partidos.</span>
+            </div>
+          ) : !userMatches.length ? (
+            <div className="result-state-card">
+              <strong>Sin partidos asignados</strong>
+              <span>No encontramos partidos vinculados a tu cuenta en este evento.</span>
+            </div>
+          ) : (
           <form onSubmit={onSubmit} className="score-form">
             <select
               value={activeRound}
@@ -966,6 +1272,13 @@ function PublicResults({ events, pairs, matches, standings, selectedEventId, set
             </select>
 
             {selectedMatch && (
+              <>
+              {selectedSubmission && (
+                <div className={`result-state-card ${selectedSubmission.status}`}>
+                  <strong>{selectedSubmission.status === "conflicto" ? "Resultado en conflicto" : selectedSubmission.status === "confirmado" ? "Resultado confirmado" : "Resultado pendiente"}</strong>
+                  <span>Tu reporte: {selectedSubmission.pair_one_score}-{selectedSubmission.pair_two_score}</span>
+                </div>
+              )}
               <div className="scoreboard">
                 <div>
                   <span>{pairOne ? pairName(pairOne) : "Pareja 1"}</span>
@@ -991,12 +1304,21 @@ function PublicResults({ events, pairs, matches, standings, selectedEventId, set
                   />
                 </div>
               </div>
+              </>
             )}
 
-            <button disabled={!selectedEventId || !form.match_id}><FileCheck2 size={16} /> Guardar resultado</button>
+            <button disabled={!selectedEventId || !form.match_id}><FileCheck2 size={16} /> Reportar resultado</button>
           </form>
+          )}
         </section>
       </div>
+
+      {conflictCount > 0 && (
+        <div className="fixture-collision-alert">
+          <strong>{conflictCount} alerta{conflictCount === 1 ? "" : "s"} de resultado</strong>
+          <span>Hay reportes inconsistentes pendientes de revisión por mesa.</span>
+        </div>
+      )}
 
       <section className="panel">
         <h2><Medal size={18} /> Ranking por categoría</h2>
@@ -1039,6 +1361,7 @@ function PublicResults({ events, pairs, matches, standings, selectedEventId, set
 
 function EventsPage(props) {
   const [eventTab, setEventTab] = useState("organization");
+  const [showClosedEvents, setShowClosedEvents] = useState(false);
   const {
     events,
     players,
@@ -1062,6 +1385,8 @@ function EventsPage(props) {
     setFixtureForm,
     resultForm,
     setResultForm,
+    rankingConfigForm,
+    setRankingConfigForm,
     whatsapp,
     submitEvent,
     submitPlayer,
@@ -1069,10 +1394,16 @@ function EventsPage(props) {
     submitMatch,
     submitGenerateFixture,
     submitGenerateBracket,
+    submitRankingConfig,
     deleteSelectedEvent,
+    closeSelectedEvent,
+    closePastEvents,
+    confirmAction,
     authUser,
     run,
   } = props;
+  const visibleEvents = showClosedEvents ? events : events.filter(isEventActive);
+  const pastActiveCount = events.filter((event) => isEventActive(event) && isPastEvent(event)).length;
   const completePairsCount = pairs.filter((pair) => pair.status === "completa" && pair.player_two_id).length;
   const categoriesWithFinals = new Set(
     pairs
@@ -1100,9 +1431,11 @@ function EventsPage(props) {
       capacity: selectedEvent.capacity ?? 16,
       tournament_type: selectedEvent.tournament_type || "Americano",
       category_configs: selectedEvent.category_configs || [],
+      ranking_config: selectedEvent.ranking_config || {},
       description: selectedEvent.description || "",
       is_active: selectedEvent.is_active ?? true,
     });
+    setRankingConfigForm({ ...defaultRankingConfig, ...(selectedEvent.ranking_config || {}) });
   }, [selectedEvent?.id]);
 
   return (
@@ -1110,10 +1443,24 @@ function EventsPage(props) {
       <section className="panel main-panel">
         <div className="section-head">
           <h2><ListChecks size={18} /> Operación del evento</h2>
-          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)}>
-            <option value="">Seleccionar evento</option>
-            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
-          </select>
+          <div className="event-picker">
+            <label className="event-history-toggle">
+              <input
+                type="checkbox"
+                checked={showClosedEvents}
+                onChange={(event) => setShowClosedEvents(event.target.checked)}
+              />
+              <span>Ver cerrados</span>
+            </label>
+            <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)}>
+              <option value="">Seleccionar evento</option>
+              {visibleEvents.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.name}{isEventActive(event) ? "" : " (cerrado)"}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {selectedEvent ? (
@@ -1121,6 +1468,7 @@ function EventsPage(props) {
             <div className="event-summary">
               <strong>{selectedEvent.name}</strong>
               <span>{selectedEvent.date} - {selectedEvent.place} - {selectedEvent.categories}</span>
+              {!isEventActive(selectedEvent) && <em>Evento cerrado</em>}
             </div>
 
             <div className="event-tabs">
@@ -1134,6 +1482,20 @@ function EventsPage(props) {
             {eventTab === "event" && (
               <div className="organization-section">
                 <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={Boolean(selectedEventId)} />
+                <div className="danger-zone archive-zone">
+                  <div>
+                    <strong>Cerrar eventos</strong>
+                    <span>Los eventos cerrados se conservan, pero no aparecen en Registro, Resultados ni selectores operativos.</span>
+                  </div>
+                  <div className="danger-actions">
+                    <button type="button" className="secondary-action" onClick={closePastEvents} disabled={!pastActiveCount}>
+                      Cerrar pasados ({pastActiveCount})
+                    </button>
+                    <button type="button" className="secondary-action" onClick={closeSelectedEvent} disabled={!selectedEvent || !isEventActive(selectedEvent)}>
+                      Cerrar este evento
+                    </button>
+                  </div>
+                </div>
                 <div className="danger-zone">
                   <div>
                     <strong>Eliminar evento</strong>
@@ -1187,7 +1549,7 @@ function EventsPage(props) {
             </div>
 
             <div className="data-grid">
-                  <PairsBlock pairs={pairs} players={playerOptions} eventId={selectedEventId} onChange={run} />
+                  <PairsBlock pairs={pairs} players={playerOptions} eventId={selectedEventId} onChange={run} confirmAction={confirmAction} />
             </div>
 
             </>
@@ -1314,6 +1676,11 @@ function EventsPage(props) {
 
             {eventTab === "ranking" && (
               <div className="ranking-admin-grid">
+                <RankingConfigPanel
+                  config={rankingConfigForm}
+                  setConfig={setRankingConfigForm}
+                  onSave={submitRankingConfig}
+                />
                 <RankingBlock ranking={ranking} standings={standings} />
               </div>
             )}
@@ -1779,9 +2146,8 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }
   );
 }
 
-function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, onSubmit, loading, pairs }) {
+function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, notice, setNotice, onSubmit, loading, pairs, goSignup, goLogin }) {
   const [partnerMode, setPartnerMode] = useState("searching");
-  const [partnerSource, setPartnerSource] = useState("member");
   const eventCategories = [
     ...new Set([
       ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
@@ -1794,6 +2160,18 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
   const availableMembers = members.filter((member) => member.id !== authUser?.id);
   const selectedPartnerMember = availableMembers.find((member) => String(member.id) === String(form.partner_member_id));
   const selectedEventPairs = pairs.filter((pair) => String(pair.event_id) === String(selectedEventId));
+  const activeSelectedPairs = selectedEventPairs.filter((pair) => pair.status !== "lista_espera");
+  const availableSpots = selectedEvent ? Math.max((selectedEvent.capacity || 0) - activeSelectedPairs.length, 0) : 0;
+  const needsPlayerAccount = authUser?.role !== "jugador";
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setNotice(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [notice, setNotice]);
 
   function applyPartnerMember(memberId) {
     const member = availableMembers.find((item) => String(item.id) === String(memberId));
@@ -1807,38 +2185,46 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
     });
   }
 
-  function useGuestPartner() {
-    setPartnerSource("guest");
-    setForm({
-      ...form,
-      partner_member_id: "",
-      partner_name: "",
-      partner_email: "",
-      partner_phone: "",
-      partner_preferred_side: "indiferente",
-    });
-  }
-
   return (
     <section className="public-page">
+      {notice && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setNotice(null)}>
+          <div className="registration-modal" role="dialog" aria-modal="true" aria-labelledby="registration-notice-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setNotice(null)} aria-label="Cerrar aviso">
+              <X size={18} />
+            </button>
+            <div className="modal-icon">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <p className="eyebrow">Registro</p>
+              <h2 id="registration-notice-title">{notice.title}</h2>
+              <p>{notice.message}</p>
+              <small>Revisa la lista de inscritos de {notice.eventName} antes de intentar nuevamente.</small>
+            </div>
+            <button type="button" onClick={() => setNotice(null)}>Entendido</button>
+          </div>
+        </div>
+      )}
       <div className="registration-shell">
         <section className="registration-stage">
           <div className="registration-title">
-            <p className="eyebrow">Registro jugadores</p>
-            <h2>Inscripción al evento</h2>
-            <p>Elige dónde jugar, completa tus datos y confirma si vienes con partner.</p>
+            <p className="eyebrow">Inscripciones AMAR</p>
+            <h2>Registro de jugadores</h2>
+            <p>Cuenta obligatoria, partner registrado y evento activo en un solo flujo.</p>
           </div>
           <div className="profile-callout">
             {authUser?.role === "jugador" ? (
               <>
-                <strong>Inscribiendo como {authUser.name}</strong>
-                <span>Tus datos se cargaron desde tu perfil.</span>
+                <span>Cuenta jugador</span>
+                <strong>{authUser.name}</strong>
+                <small>{authUser.email}</small>
               </>
             ) : (
               <>
-                <strong>¿Juegas seguido?</strong>
-                <span>Crea tu perfil para no llenar tus datos cada vez.</span>
-                <button type="button" className="secondary-action" onClick={() => { window.location.href = "/crear-cuenta"; }}>
+                <strong>Cuenta jugador requerida</strong>
+                <span>Crea o usa tu cuenta para inscribirte a eventos.</span>
+                <button type="button" className="secondary-action" onClick={goSignup}>
                   Crear perfil jugador
                 </button>
               </>
@@ -1847,13 +2233,15 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
 
           <div className="registration-steps" aria-label="Pasos de inscripción">
             <span className={selectedEventId ? "done" : "active"}>1. Evento</span>
-            <span className={form.name ? "done" : selectedEventId ? "active" : ""}>2. Datos</span>
-            <span className={form.name && selectedEventId ? "active" : ""}>3. Confirmar</span>
+            <span className={!needsPlayerAccount ? "done" : selectedEventId ? "active" : ""}>2. Cuenta</span>
+            <span className={!needsPlayerAccount && selectedEventId ? "active" : ""}>3. Inscribir</span>
           </div>
 
           <div className="registration-event-cards">
             {events.map((event) => {
               const isSelected = String(event.id) === String(selectedEventId);
+              const eventPairs = pairs.filter((pair) => String(pair.event_id) === String(event.id) && pair.status !== "lista_espera");
+              const eventSpots = Math.max((event.capacity || 0) - eventPairs.length, 0);
               return (
                 <button
                   type="button"
@@ -1867,14 +2255,36 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                   <strong>{event.name}</strong>
                   <span>{event.date} · {event.schedule}</span>
                   <span>{event.place}</span>
-                  <em>{event.categories}</em>
+                  <em>{event.categories} · {eventSpots} cupos</em>
                 </button>
               );
             })}
           </div>
+          <div className="member-count-card">
+            <span>Miembros jugadores</span>
+            <strong>{members.length}</strong>
+            <small>Disponibles para elegir como partner registrado.</small>
+          </div>
         </section>
 
         <section className="panel registration-panel">
+          {needsPlayerAccount ? (
+            <div className="account-required">
+              <div className="modal-icon">
+                <UserPlus size={24} />
+              </div>
+              <div>
+                <p className="eyebrow">Registro con cuenta</p>
+                <h2>Primero crea tu perfil jugador</h2>
+                <p>Para inscribirte necesitamos que cada jugador tenga cuenta. Así evitamos duplicados y los datos quedan guardados para próximos eventos.</p>
+              </div>
+              <div className="modal-actions">
+                <button type="button" onClick={goSignup}>Crear perfil jugador</button>
+                <button type="button" className="secondary-action" onClick={goLogin}>Ya tengo cuenta</button>
+              </div>
+            </div>
+          ) : (
+          <>
           {success && (
             <div className={`registration-success ${success.waitlisted ? "waitlisted" : ""}`}>
               <strong>{success.waitlisted ? "Quedaste en lista de espera" : "Inscripción registrada"}</strong>
@@ -1891,10 +2301,23 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
               {hasPartner ? "Pareja completa" : "Buscando partner"}
             </span>
           </div>
+          <div className="player-account-strip">
+            <div>
+              <span>Jugador</span>
+              <strong>{authUser?.name || form.name}</strong>
+              <small>{authUser?.email || form.email}</small>
+            </div>
+            <div>
+              <span>Evento</span>
+              <strong>{selectedEvent?.name || "Selecciona evento"}</strong>
+              <small>{availableSpots} cupos disponibles</small>
+            </div>
+          </div>
           <form onSubmit={onSubmit} className="registration-form">
+            <div className="form-section-title">Cuenta jugador</div>
             <label className="form-field">
               <span>Nombre jugador</span>
-              <input placeholder="Nombre y apellido" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+              <input placeholder="Nombre y apellido" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required disabled />
             </label>
             <label className="form-field">
               <span>Email</span>
@@ -1904,7 +2327,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 required
-                disabled={authUser?.role === "jugador"}
+                disabled
               />
             </label>
             <label className="form-field">
@@ -1926,7 +2349,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
               </select>
             </label>
 
-            <div className="form-divider">Partner</div>
+            <div className="form-section-title">Partner</div>
             <div className="registration-choice">
               <button
                 type="button"
@@ -1945,81 +2368,33 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
 
             {hasPartner && (
               <>
-                <div className="partner-source">
-                  <button
-                    type="button"
-                    className={partnerSource === "member" ? "active" : ""}
-                    onClick={() => {
-                      setPartnerSource("member");
-                      setForm({ ...form, partner_member_id: "", partner_name: "", partner_email: "", partner_phone: "", partner_preferred_side: "indiferente" });
-                    }}
-                  >
-                    Miembro registrado
-                  </button>
-                  <button
-                    type="button"
-                    className={partnerSource === "guest" ? "active" : ""}
-                    onClick={useGuestPartner}
-                  >
-                    Invitado sin cuenta
-                  </button>
+                <div className="account-hint">
+                  <strong>El partner también debe tener cuenta jugador.</strong>
+                  <span>Si no aparece en la lista, pídele que cree su perfil y luego vuelve a seleccionarlo.</span>
                 </div>
 
-                {partnerSource === "member" ? (
-                  <>
-                    <label className="form-field wide-field">
-                      <span>Seleccionar partner</span>
-                      <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)} required={hasPartner && partnerSource === "member"}>
-                        <option value="">Buscar en miembros registrados</option>
-                        {availableMembers.map((member) => (
-                          <option key={member.id} value={member.id}>
-                            {member.name}{member.category ? ` · ${member.category}` : ""}{member.preferred_side ? ` · ${member.preferred_side}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <small>Si no aparece en esta lista, usa Invitado sin cuenta.</small>
-                    </label>
-                    {selectedPartnerMember && (
-                      <div className="member-preview">
-                        <strong>{selectedPartnerMember.name}</strong>
-                        <span>{selectedPartnerMember.category || "Sin categoría"} · {selectedPartnerMember.preferred_side || "lado indiferente"}</span>
-                        {selectedPartnerMember.phone && <small>{selectedPartnerMember.phone}</small>}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <label className="form-field">
-                      <span>Nombre partner</span>
-                      <input placeholder="Nombre y apellido" value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} required={hasPartner && partnerSource === "guest"} />
-                    </label>
-                    <label className="form-field">
-                      <span>Email partner</span>
-                      <input
-                        type="email"
-                        placeholder="correo@dominio.com"
-                        value={form.partner_email}
-                        onChange={(e) => setForm({ ...form, partner_email: e.target.value })}
-                        required={hasPartner && partnerSource === "guest"}
-                      />
-                    </label>
-                    <label className="form-field">
-                      <span>Teléfono partner</span>
-                      <input placeholder="Opcional" value={form.partner_phone} onChange={(e) => setForm({ ...form, partner_phone: e.target.value })} />
-                    </label>
-                    <label className="form-field">
-                      <span>Lado partner</span>
-                      <select value={form.partner_preferred_side} onChange={(e) => setForm({ ...form, partner_preferred_side: e.target.value })}>
-                        <option value="drive">Drive</option>
-                        <option value="reves">Revés</option>
-                        <option value="indiferente">Indiferente</option>
-                      </select>
-                    </label>
-                  </>
+                <label className="form-field wide-field">
+                  <span>Seleccionar partner</span>
+                  <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)} required={hasPartner}>
+                    <option value="">Buscar en miembros registrados</option>
+                    {availableMembers.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}{member.category ? ` · ${member.category}` : ""}{member.preferred_side ? ` · ${member.preferred_side}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <small>Solo aparecen cuentas con rol jugador.</small>
+                </label>
+                {selectedPartnerMember && (
+                  <div className="member-preview">
+                    <strong>{selectedPartnerMember.name}</strong>
+                    <span>{selectedPartnerMember.category || "Sin categoría"} · {selectedPartnerMember.preferred_side || "lado indiferente"}</span>
+                    {selectedPartnerMember.phone && <small>{selectedPartnerMember.phone}</small>}
+                  </div>
                 )}
               </>
             )}
-            <div className="form-divider">Pago</div>
+            <div className="form-section-title">Pago</div>
             <label className="payment-toggle">
               <input
                 type="checkbox"
@@ -2044,13 +2419,29 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 </span>
               </label>
             )}
-            <button disabled={loading || !selectedEventId || !form.name.trim() || !form.email.trim() || (hasPartner && (!form.partner_name.trim() || (partnerSource === "guest" && !form.partner_email.trim())))}>
+            <button disabled={loading || !selectedEventId || !form.name.trim() || !form.email.trim() || (hasPartner && !form.partner_member_id)}>
               <UserPlus size={16} /> {loading ? "Registrando..." : "Confirmar inscripción"}
             </button>
           </form>
+          </>
+          )}
         </section>
 
         <aside className="registration-summary">
+          <div className="summary-header">
+            <span>Estado de inscripción</span>
+            <strong>{selectedEvent?.name || "Sin evento"}</strong>
+          </div>
+          <div className="summary-stats">
+            <div>
+              <strong>{availableSpots}</strong>
+              <span>Cupos</span>
+            </div>
+            <div>
+              <strong>{selectedEventPairs.length}</strong>
+              <span>Parejas</span>
+            </div>
+          </div>
           <div>
             <span>Evento</span>
             <strong>{selectedEvent?.name || "Selecciona un evento"}</strong>
@@ -2064,7 +2455,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
           <div>
             <span>Partner</span>
             <strong>{hasPartner ? (form.partner_name || "Pendiente") : "Buscando partner"}</strong>
-            <small>{hasPartner ? (form.partner_paid ? "Pareja completa · pagado" : "Pareja completa · pago pendiente") : "Te anotamos individualmente"}</small>
+            <small>{hasPartner ? (selectedPartnerMember ? "Cuenta jugador seleccionada" : "Selecciona una cuenta jugador") : "Te anotamos individualmente"}</small>
           </div>
           <section className="registered-list">
             <div className="block-head">
@@ -2113,7 +2504,7 @@ function DataBlock({ title, rows }) {
   );
 }
 
-function PairsBlock({ pairs, players, eventId, onChange }) {
+function PairsBlock({ pairs, players, eventId, onChange, confirmAction }) {
   const completePairs = pairs.filter((pair) => pair.status === "completa");
   const searchingPairs = pairs.filter((pair) => pair.status === "buscando_partner");
   const waitlistPairs = pairs.filter((pair) => pair.status === "lista_espera");
@@ -2180,8 +2571,15 @@ function PairsBlock({ pairs, players, eventId, onChange }) {
                       className="danger-action"
                       type="button"
                       onClick={() => {
-                        const confirmed = window.confirm(`Eliminar ${pairName(pair)} del evento? Tambien se borraran sus partidos y resultados asociados.`);
-                        if (confirmed) onChange(() => api.deletePair(eventId, pair.id));
+                        confirmAction({
+                          tone: "danger",
+                          title: "Eliminar pareja",
+                          message: `Se eliminará ${pairName(pair)} del evento junto con sus partidos y resultados asociados.`,
+                          confirmLabel: "Eliminar pareja",
+                          onConfirm: async () => {
+                            await onChange(() => api.deletePair(eventId, pair.id));
+                          },
+                        });
                       }}
                     >
                       Eliminar
@@ -2280,6 +2678,57 @@ function RankingBlock({ ranking, standings }) {
           <p key={standing.id}>{standing.position}. {pairName(standing.pair)} - {standing.points} pts</p>
         ))
       )}
+    </article>
+  );
+}
+
+function RankingConfigPanel({ config, setConfig, onSave }) {
+  const mergedConfig = { ...defaultRankingConfig, ...(config || {}) };
+  const tiebreakers = mergedConfig.tiebreakers?.length ? mergedConfig.tiebreakers : defaultRankingConfig.tiebreakers;
+
+  function updatePoints(key, value) {
+    setConfig({ ...mergedConfig, [key]: Number(value) });
+  }
+
+  function updateTiebreaker(index, value) {
+    const next = [...tiebreakers];
+    next[index] = value;
+    setConfig({ ...mergedConfig, tiebreakers: next });
+  }
+
+  return (
+    <article className="data-block ranking-config-panel">
+      <div className="block-head">
+        <h3><Medal size={16} /> Parámetros de ranking</h3>
+        <button type="button" onClick={() => onSave(mergedConfig)}>Guardar y recalcular</button>
+      </div>
+      <div className="ranking-points-grid">
+        <label className="form-field compact">
+          <span>Victoria</span>
+          <input type="number" value={mergedConfig.win_points} onChange={(event) => updatePoints("win_points", event.target.value)} />
+        </label>
+        <label className="form-field compact">
+          <span>Empate</span>
+          <input type="number" value={mergedConfig.draw_points} onChange={(event) => updatePoints("draw_points", event.target.value)} />
+        </label>
+        <label className="form-field compact">
+          <span>Derrota</span>
+          <input type="number" value={mergedConfig.loss_points} onChange={(event) => updatePoints("loss_points", event.target.value)} />
+        </label>
+      </div>
+      <div className="ranking-tiebreakers">
+        <span>Orden de desempate</span>
+        {tiebreakers.map((criterion, index) => (
+          <label className="form-field compact" key={`${criterion}-${index}`}>
+            <span>{index + 1}. criterio</span>
+            <select value={criterion} onChange={(event) => updateTiebreaker(index, event.target.value)}>
+              {rankingTiebreakerOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
     </article>
   );
 }

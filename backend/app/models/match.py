@@ -25,3 +25,4 @@ class Match(Base):
     pair_one = relationship("EventPair", foreign_keys=[pair_one_id])
     pair_two = relationship("EventPair", foreign_keys=[pair_two_id])
     winner_pair = relationship("EventPair", foreign_keys=[winner_pair_id])
+    result_submissions = relationship("MatchResultSubmission", back_populates="match", cascade="all, delete-orphan")

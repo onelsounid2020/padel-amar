@@ -1,6 +1,15 @@
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 let authToken = localStorage.getItem("amar_auth_token") || "";
 
+export class ApiError extends Error {
+  constructor(message, status, detail) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 export function setAuthToken(token) {
   authToken = token || "";
   if (authToken) localStorage.setItem("amar_auth_token", authToken);
@@ -19,7 +28,7 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Error de API" }));
-    throw new Error(error.detail || "Error de API");
+    throw new ApiError(error.detail || "Error de API", response.status, error.detail);
   }
 
   if (response.status === 204) return null;
@@ -77,7 +86,14 @@ export const api = {
   },
   registerResult: (eventId, matchId, data) =>
     request(`/events/${eventId}/matches/${matchId}/result`, { method: "PATCH", body: JSON.stringify(data) }),
+  submitResult: (eventId, matchId, data) =>
+    request(`/events/${eventId}/matches/${matchId}/result-submissions`, { method: "POST", body: JSON.stringify(data) }),
+  resultSubmissions: (eventId, status = "") => {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    return request(`/events/${eventId}/matches/result-submissions${query}`);
+  },
   standings: (eventId) => request(`/events/${eventId}/standings`),
+  recalculateStandings: (eventId) => request(`/events/${eventId}/standings/recalculate`, { method: "POST" }),
   finalRanking: (eventId) => request(`/events/${eventId}/standings/ranking-final`),
   whatsapp: (eventId) => request(`/events/${eventId}/whatsapp`),
   publicRegister: (eventId, data) =>

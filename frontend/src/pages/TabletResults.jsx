@@ -56,6 +56,7 @@ export function TabletResults({
   events,
   pairs,
   matches,
+  resultSubmissions = [],
   standings,
   selectedEventId,
   setSelectedEventId,
@@ -110,6 +111,7 @@ export function TabletResults({
   const activeTurn = turnFilter === "next" ? nextTurn : turnFilter;
   const completedCount = matchRows.filter((row) => row.done).length;
   const pendingCount = matchRows.length - completedCount;
+  const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
   const standingsByCategory = standings.reduce((groups, standing) => {
     const category = standing.pair.category || "Sin categoria";
     groups[category] = [...(groups[category] || []), standing];
@@ -189,6 +191,13 @@ export function TabletResults({
           <option value="all">Todos</option>
         </select>
       </div>
+
+      {conflictCount > 0 && (
+        <div className="fixture-collision-alert tablet-conflict-alert">
+          <strong>{conflictCount} conflicto{conflictCount === 1 ? "" : "s"} de resultado</strong>
+          <span>Hay marcadores reportados por jugadores que no coinciden. Revisa el partido antes de guardar el resultado oficial.</span>
+        </div>
+      )}
 
       <div className="tablet-match-grid">
         {visibleRows.length ? visibleRows.map((row) => {

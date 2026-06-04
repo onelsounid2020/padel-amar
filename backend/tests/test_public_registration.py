@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Event, EventPair, EventRegistration, PairStatus, PlayerPayment, RegistrationStatus
+from app.models import Event, EventPair, EventRegistration, PairStatus, PlayerPayment, RegistrationStatus, User, UserRole
 from app.routers.public import register_player
 from app.schemas.public import PublicRegistrationRequest
 
@@ -36,8 +36,13 @@ class PublicRegistrationTest(unittest.TestCase):
         self.db.close()
 
     def test_full_event_sends_public_registration_to_waitlist_without_payments(self) -> None:
-        first = register_player(self.event.id, self._payload("Onel", "onel@example.com", "Vero", "vero@example.com"), self.db)
-        second = register_player(self.event.id, self._payload("Nico", "nico@example.com", "Cami", "cami@example.com"), self.db)
+        onel = self._user("Onel", "onel@example.com")
+        vero = self._user("Vero", "vero@example.com")
+        nico = self._user("Nico", "nico@example.com")
+        cami = self._user("Cami", "cami@example.com")
+
+        first = register_player(self.event.id, self._payload(onel, vero), self.db, onel)
+        second = register_player(self.event.id, self._payload(nico, cami), self.db, nico)
 
         self.assertEqual(first.pair.status, PairStatus.completa)
         self.assertEqual(second.pair.status, PairStatus.lista_espera)
@@ -52,10 +57,11 @@ class PublicRegistrationTest(unittest.TestCase):
         self.assertTrue(all(payment.pair_id == first.pair.id for payment in payments))
 
     def test_duplicate_email_is_rejected_for_same_event(self) -> None:
-        register_player(self.event.id, self._payload("Onel", "Onel@Example.com"), self.db)
+        onel = self._user("Onel", "onel@example.com")
+        register_player(self.event.id, self._payload(onel), self.db, onel)
 
         with self.assertRaises(HTTPException) as raised:
-            register_player(self.event.id, self._payload("Onel Cuellar", "onel@example.com"), self.db)
+            register_player(self.event.id, self._payload(onel), self.db, onel)
 
         self.assertEqual(raised.exception.status_code, 409)
         pairs = self.db.scalars(select(EventPair).where(EventPair.event_id == self.event.id)).all()
@@ -63,20 +69,33 @@ class PublicRegistrationTest(unittest.TestCase):
 
     def _payload(
         self,
-        name: str,
-        email: str,
-        partner_name: str | None = None,
-        partner_email: str | None = None,
+        user: User,
+        partner: User | None = None,
     ) -> PublicRegistrationRequest:
         return PublicRegistrationRequest(
-            name=name,
-            email=email,
+            player_user_id=user.id,
+            name=user.name,
+            email=user.email,
             paid=True,
             category="5ta",
-            partner_name=partner_name,
-            partner_email=partner_email,
-            partner_paid=True,
+            partner_user_id=partner.id if partner else None,
+            partner_name=partner.name if partner else None,
+            partner_email=partner.email if partner else None,
+            partner_paid=bool(partner),
         )
+
+    def _user(self, name: str, email: str) -> User:
+        user = User(
+            name=name,
+            email=email,
+            password_hash="test",
+            category="5ta",
+            role=UserRole.jugador,
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
 
 if __name__ == "__main__":

@@ -177,6 +177,100 @@ h3 {
   padding: 12px;
 }
 
+.modal-backdrop {
+  align-items: center;
+  background: rgb(8 34 59 / 0.58);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 50;
+}
+
+.registration-modal {
+  background: #fffefa;
+  border: 1px solid #b7d3e5;
+  border-radius: 8px;
+  box-shadow: 0 24px 60px rgb(8 34 59 / 0.28);
+  color: #0a2239;
+  display: grid;
+  gap: 14px;
+  max-width: 460px;
+  padding: 22px;
+  position: relative;
+  width: min(100%, 460px);
+}
+
+.registration-modal h2 {
+  color: #08223b;
+  font-size: 1.35rem;
+  margin: 2px 0 8px;
+}
+
+.registration-modal p {
+  line-height: 1.45;
+  margin: 0;
+}
+
+.registration-modal small {
+  color: #51625f;
+  display: block;
+  line-height: 1.35;
+  margin-top: 8px;
+}
+
+.registration-modal > button:last-child {
+  justify-self: start;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modal-close {
+  align-items: center;
+  background: #eaf7fb;
+  border: 1px solid #c6d9ea;
+  border-radius: 7px;
+  color: #0a3154;
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 36px;
+}
+
+.modal-icon {
+  align-items: center;
+  background: #fff0e7;
+  border: 1px solid #f1a57a;
+  border-radius: 8px;
+  color: #a43a16;
+  display: inline-flex;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+
+.modal-icon.success {
+  background: #ecf9e8;
+  border-color: #a8e641;
+  color: #17451d;
+}
+
+.modal-icon.danger,
+.confirm-modal.danger .modal-icon {
+  background: #fff0e7;
+  border-color: #e67d47;
+  color: #7a1f10;
+}
+
 .login-page {
   align-items: center;
   display: grid;
@@ -216,12 +310,20 @@ h3 {
 }
 
 .signup-page {
-  align-items: center;
   display: grid;
-  min-height: calc(100dvh - (var(--page-pad) * 2));
   padding: 20px 0;
 }
 
+.signup-shell {
+  display: grid;
+  gap: var(--section-gap);
+  grid-template-columns: minmax(280px, 0.85fr) minmax(360px, 1.15fr);
+  margin: 0 auto;
+  max-width: 1080px;
+  width: min(100%, 1080px);
+}
+
+.signup-intro,
 .signup-card {
   background: rgb(255 254 250 / 0.96);
   border: 1px solid #c7d9e4;
@@ -229,10 +331,56 @@ h3 {
   box-shadow: 0 18px 38px rgb(8 34 59 / 0.16);
   display: grid;
   gap: 14px;
-  margin: 0 auto;
-  max-width: 780px;
   padding: clamp(14px, 2vw, 20px);
-  width: min(100%, 780px);
+}
+
+.signup-intro {
+  align-content: start;
+  background:
+    linear-gradient(90deg, rgb(255 255 255 / 0.1) 0 1px, transparent 1px 72px),
+    linear-gradient(135deg, #08223b, #0f6ea8 55%, #13a66f);
+  color: #ffffff;
+}
+
+.signup-intro h2,
+.signup-card-head h2 {
+  font-size: clamp(1.45rem, 3vw, 2.1rem);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.signup-intro h2 {
+  color: #ffffff;
+}
+
+.signup-intro p {
+  color: #e9f8ff;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.signup-benefits {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.signup-benefits span {
+  background: rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 8px;
+  font-weight: 900;
+  padding: 10px 12px;
+}
+
+.signup-card-head {
+  border-bottom: 1px solid #d8e8f1;
+  padding-bottom: 10px;
+}
+
+.signup-card-head p:last-child {
+  color: #51625f;
+  margin: 0;
 }
 
 .signup-form {
@@ -320,6 +468,22 @@ h3 {
   max-width: 320px;
 }
 
+.event-picker {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.event-history-toggle {
+  align-items: center;
+  color: #425a57;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 800;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .event-summary {
   background: linear-gradient(135deg, #0a3154, #0f6ea8 58%, #13a66f);
   border: 0;
@@ -333,6 +497,12 @@ h3 {
 
 .event-summary span {
   color: #e6f5ff;
+}
+
+.event-summary em {
+  color: #d9ff9d;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .form-grid,
@@ -479,6 +649,26 @@ h3 {
 .danger-zone span {
   color: #8d3a1d;
   font-size: 0.9rem;
+}
+
+.archive-zone {
+  background: #f5fbfd;
+  border-color: #b7d3e5;
+  color: #0a3154;
+  margin-bottom: 12px;
+}
+
+.archive-zone strong {
+  color: #0a3154;
+}
+
+.archive-zone span {
+  color: #51625f;
+}
+
+.danger-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .user-form-grid {
@@ -1772,6 +1962,12 @@ h3 {
   line-height: 1.3;
 }
 
+.profile-callout small {
+  color: #51625f;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .profile-callout button {
   justify-self: start;
 }
@@ -1840,6 +2036,28 @@ h3 {
   color: #d9edf8;
 }
 
+.member-count-card {
+  background: #f5fbfd;
+  border: 1px solid #c6d9ea;
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.member-count-card span,
+.member-count-card small {
+  color: #51625f;
+  font-weight: 800;
+}
+
+.member-count-card strong {
+  color: #08223b;
+  font-size: 1.9rem;
+  line-height: 1;
+}
+
 .registration-panel .block-head {
   align-items: center;
 }
@@ -1885,6 +2103,131 @@ h3 {
 
 .registration-success button {
   justify-self: start;
+}
+
+.account-required {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+  min-height: 420px;
+  padding: clamp(8px, 2vw, 18px);
+}
+
+.account-required h2 {
+  color: #08223b;
+  font-size: 1.45rem;
+  margin: 2px 0 8px;
+}
+
+.account-required p {
+  color: #425a57;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 560px;
+}
+
+.account-hint {
+  background: #f5fbfd;
+  border: 1px solid #c6d9ea;
+  border-radius: 8px;
+  color: #0a3154;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.account-hint span {
+  color: #51625f;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.player-account-strip {
+  background: #f7fbff;
+  border: 1px solid #d8e7f4;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.player-account-strip div,
+.summary-header {
+  display: grid;
+  gap: 3px;
+}
+
+.player-account-strip span,
+.summary-header span,
+.summary-stats span {
+  color: #0e5d8f;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.player-account-strip strong,
+.summary-header strong {
+  color: #08223b;
+  line-height: 1.15;
+}
+
+.player-account-strip small {
+  color: #51625f;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.form-section-title {
+  align-items: center;
+  color: #0e5d8f;
+  display: flex;
+  font-size: 0.82rem;
+  font-weight: 900;
+  gap: 10px;
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
+.form-section-title::after {
+  background: #d8e8f1;
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
+.summary-header {
+  background: #f5fbfd;
+  border: 1px solid #c6d9ea;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.summary-stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.summary-stats div {
+  background: #08223b;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+}
+
+.summary-stats strong {
+  color: #ffffff;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.summary-stats span {
+  color: #d9edf8;
 }
 
 .registered-list {
@@ -2080,6 +2423,39 @@ h3 {
   gap: 14px;
 }
 
+.result-state-card {
+  background: #f5fbfd;
+  border: 1px solid #c6d9ea;
+  border-radius: 8px;
+  color: #0a3154;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.result-state-card strong {
+  color: #08223b;
+}
+
+.result-state-card span {
+  color: #51625f;
+  font-weight: 800;
+}
+
+.result-state-card.confirmado {
+  background: #ecf9e8;
+  border-color: #a8e641;
+}
+
+.result-state-card.conflicto {
+  background: #fff0e7;
+  border-color: #e67d47;
+}
+
+.result-state-card.conflicto strong {
+  color: #7a1f10;
+}
+
 .scoreboard {
   align-items: stretch;
   background: linear-gradient(135deg, #08223b, #0a3154);
@@ -2126,6 +2502,26 @@ h3 {
 .ranking-grid {
   display: grid;
   gap: 14px;
+}
+
+.ranking-config-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.ranking-points-grid,
+.ranking-tiebreakers {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.ranking-tiebreakers > span {
+  color: #0e5d8f;
+  font-size: 0.82rem;
+  font-weight: 900;
+  grid-column: 1 / -1;
+  text-transform: uppercase;
 }
 
 .ranking-table {
@@ -2504,6 +2900,7 @@ h3 {
   .data-grid,
   .public-grid,
   .registration-shell,
+  .signup-shell,
   .payments-grid,
   .fixture-workbench,
   .fixture-category-grid,
@@ -2539,7 +2936,8 @@ h3 {
 
   .user-form-grid,
   .user-row,
-  .signup-form {
+  .signup-form,
+  .player-account-strip {
     grid-template-columns: 1fr;
   }
 
@@ -2594,6 +2992,12 @@ h3 {
 
   .section-head select {
     max-width: none;
+  }
+
+  .event-picker,
+  .danger-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .match-row,
