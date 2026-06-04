@@ -474,6 +474,10 @@ h3 {
   gap: 10px;
 }
 
+.event-picker .secondary-action {
+  width: auto;
+}
+
 .event-history-toggle {
   align-items: center;
   color: #425a57;
@@ -1667,6 +1671,29 @@ h3 {
   display: grid;
   gap: 14px;
   grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+}
+
+.event-whatsapp-card {
+  min-height: 0;
+}
+
+.event-whatsapp-card .block-head {
+  align-items: end;
+}
+
+.event-whatsapp-card .block-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.event-whatsapp-card .block-head p {
+  border-bottom: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.event-whatsapp-card .secondary-action {
+  width: auto;
 }
 
 .ranking-admin-grid {

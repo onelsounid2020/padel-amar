@@ -468,6 +468,7 @@ function App() {
           })),
         ranking_config: eventForm.ranking_config || rankingConfigForm || defaultRankingConfig,
       };
+      if (!selectedEventId) payload.is_active = true;
       if (selectedEventId) {
         const updated = await api.updateEvent(selectedEventId, payload);
         selectEventId(updated.id);
@@ -1393,7 +1394,7 @@ function PublicResults({ events, pairs, matches, resultSubmissions, standings, a
 }
 
 function EventsPage(props) {
-  const [eventTab, setEventTab] = useState("organization");
+  const [eventTab, setEventTab] = useState("event");
   const [showClosedEvents, setShowClosedEvents] = useState(false);
   const {
     events,
@@ -1452,6 +1453,13 @@ function EventsPage(props) {
   const configuredCourts = Number(fixtureForm.court_count || 0);
   const playerOptions = mergePlayersFromPairs(players, pairs);
 
+  function startNewEvent() {
+    setSelectedEventId("");
+    setEventForm({ ...emptyEvent });
+    setRankingConfigForm({ ...defaultRankingConfig });
+    setEventTab("event");
+  }
+
   useEffect(() => {
     if (!selectedEvent) return;
     setEventForm({
@@ -1477,6 +1485,9 @@ function EventsPage(props) {
         <div className="section-head">
           <h2><ListChecks size={18} /> Operación del evento</h2>
           <div className="event-picker">
+            <button type="button" className="secondary-action" onClick={startNewEvent}>
+              <CalendarPlus size={16} /> Nuevo evento
+            </button>
             <label className="event-history-toggle">
               <input
                 type="checkbox"
@@ -1505,8 +1516,8 @@ function EventsPage(props) {
             </div>
 
             <div className="event-tabs">
-              <button className={eventTab === "organization" ? "active" : ""} onClick={() => setEventTab("organization")}>Organización</button>
               <button className={eventTab === "event" ? "active" : ""} onClick={() => setEventTab("event")}>Evento</button>
+              <button className={eventTab === "organization" ? "active" : ""} onClick={() => setEventTab("organization")}>Organización</button>
               <button className={eventTab === "matches" ? "active" : ""} onClick={() => setEventTab("matches")}>Partidos</button>
               <button className={eventTab === "payments" ? "active" : ""} onClick={() => setEventTab("payments")}>Pagos</button>
               <button className={eventTab === "ranking" ? "active" : ""} onClick={() => setEventTab("ranking")}>Ranking</button>
@@ -1515,6 +1526,7 @@ function EventsPage(props) {
             {eventTab === "event" && (
               <div className="organization-section">
                 <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={Boolean(selectedEventId)} />
+                <EventWhatsappBlock whatsapp={whatsapp} draftEvent={eventForm} />
                 <div className="danger-zone archive-zone">
                   <div>
                     <strong>Cerrar eventos</strong>
@@ -1723,10 +1735,52 @@ function EventsPage(props) {
           <div className="organization-section">
             <p className="empty">No hay eventos cargados todavía. Crea el primero para comenzar.</p>
             <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={false} />
+            <EventWhatsappBlock whatsapp={whatsapp} draftEvent={eventForm} />
           </div>
         )}
       </section>
     </section>
+  );
+}
+
+function EventWhatsappBlock({ whatsapp, draftEvent }) {
+  const [copied, setCopied] = useState(false);
+  const draftMessage = useMemo(() => {
+    const price = Number(draftEvent.price || 0);
+    return [
+      draftEvent.name ? `*${draftEvent.name}*` : "*Nuevo evento AMAR*",
+      draftEvent.date ? `Fecha: ${draftEvent.date}` : "",
+      draftEvent.schedule ? `Horario: ${draftEvent.schedule}` : "",
+      draftEvent.place ? `Lugar: ${draftEvent.place}` : "",
+      draftEvent.categories ? `Categorías: ${draftEvent.categories}` : "",
+      price ? `Valor: $${price.toLocaleString("es-CL")}` : "",
+      draftEvent.capacity ? `Cupos: ${draftEvent.capacity}` : "",
+      "",
+      "Inscripciones abiertas.",
+    ].filter((line) => line !== "").join("\n");
+  }, [draftEvent]);
+  const message = whatsapp?.trim() || draftMessage;
+
+  async function copyMessage() {
+    if (!message) return;
+    await navigator.clipboard.writeText(message);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  return (
+    <div className="data-block event-whatsapp-card">
+      <div className="block-head">
+        <div>
+          <h3><Clipboard size={16} /> Mensaje WhatsApp</h3>
+          <p className="muted">Plantilla lista para copiar cuando el evento quede creado.</p>
+        </div>
+        <button type="button" className="secondary-action" onClick={copyMessage} disabled={!message}>
+          <Clipboard size={16} /> {copied ? "Copiado" : "Copiar mensaje"}
+        </button>
+      </div>
+      <textarea className="whatsapp" value={message} readOnly />
+    </div>
   );
 }
 
