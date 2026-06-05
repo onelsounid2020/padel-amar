@@ -674,6 +674,14 @@ function App() {
     });
   }
 
+  async function activateSelectedEvent() {
+    if (!selectedEventId || !selectedEvent) return;
+    await run(async () => {
+      const updated = await api.updateEvent(selectedEventId, { is_active: true });
+      selectEventId(updated.id);
+    });
+  }
+
   async function closePastEvents() {
     const pastActiveEvents = events.filter((event) => isEventActive(event) && isPastEvent(event));
     if (!pastActiveEvents.length) {
@@ -950,6 +958,7 @@ function App() {
       submitRankingConfig={submitRankingConfig}
       deleteSelectedEvent={deleteSelectedEvent}
       closeSelectedEvent={closeSelectedEvent}
+      activateSelectedEvent={activateSelectedEvent}
       closePastEvents={closePastEvents}
       confirmAction={confirmAction}
       authUser={authUser}
@@ -1431,6 +1440,7 @@ function EventsPage(props) {
     submitRankingConfig,
     deleteSelectedEvent,
     closeSelectedEvent,
+    activateSelectedEvent,
     closePastEvents,
     confirmAction,
     authUser,
@@ -1488,6 +1498,9 @@ function EventsPage(props) {
             <button type="button" className="secondary-action" onClick={startNewEvent}>
               <CalendarPlus size={16} /> Nuevo evento
             </button>
+            <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
+              Eliminar
+            </button>
             <label className="event-history-toggle">
               <input
                 type="checkbox"
@@ -1529,16 +1542,26 @@ function EventsPage(props) {
                 <EventWhatsappBlock whatsapp={whatsapp} draftEvent={eventForm} />
                 <div className="danger-zone archive-zone">
                   <div>
-                    <strong>Cerrar eventos</strong>
-                    <span>Los eventos cerrados se conservan, pero no aparecen en Registro, Resultados ni selectores operativos.</span>
+                    <strong>Estado del evento</strong>
+                    <span>
+                      {selectedEvent && isEventActive(selectedEvent)
+                        ? "Evento activo: aparece en Registro, Resultados y selectores operativos."
+                        : "Evento cerrado: no aparece en Registro, Resultados ni selectores operativos."}
+                    </span>
                   </div>
                   <div className="danger-actions">
                     <button type="button" className="secondary-action" onClick={closePastEvents} disabled={!pastActiveCount}>
                       Cerrar pasados ({pastActiveCount})
                     </button>
-                    <button type="button" className="secondary-action" onClick={closeSelectedEvent} disabled={!selectedEvent || !isEventActive(selectedEvent)}>
-                      Cerrar este evento
-                    </button>
+                    {selectedEvent && isEventActive(selectedEvent) ? (
+                      <button type="button" className="secondary-action" onClick={closeSelectedEvent}>
+                        Cerrar este evento
+                      </button>
+                    ) : (
+                      <button type="button" className="secondary-action" onClick={activateSelectedEvent} disabled={!selectedEvent}>
+                        <Check size={16} /> Activar evento
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="danger-zone">
@@ -1842,6 +1865,17 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <span>Tipo de torneo</span>
           <input placeholder="Americano, grupos, ranking..." value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
           <small>Descripción interna del formato general.</small>
+        </label>
+        <label className="event-active-toggle">
+          <input
+            type="checkbox"
+            checked={form.is_active !== false}
+            onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+          />
+          <span>
+            <strong>Evento activo</strong>
+            <small>Aparece en Registro, Resultados y selectores. Los eventos nuevos quedan activos por defecto.</small>
+          </span>
         </label>
         <div className="category-configs">
           <div className="block-head">

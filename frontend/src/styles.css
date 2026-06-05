@@ -478,6 +478,10 @@ h3 {
   width: auto;
 }
 
+.event-picker-action {
+  width: auto;
+}
+
 .event-history-toggle {
   align-items: center;
   color: #425a57;
@@ -582,6 +586,42 @@ h3 {
 
 .form-field.wide-field {
   grid-column: 1 / -1;
+}
+
+.event-active-toggle {
+  align-items: center;
+  background: #f4fbfe;
+  border: 1px solid #c7d9e4;
+  border-radius: 8px;
+  color: #0a3154;
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: 24px minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.event-active-toggle input {
+  accent-color: #13a66f;
+  height: 20px;
+  min-height: 20px;
+  width: 20px;
+}
+
+.event-active-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.event-active-toggle strong {
+  font-size: 0.92rem;
+}
+
+.event-active-toggle small {
+  color: #51625f;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .field-help {
