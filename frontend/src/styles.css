@@ -1086,6 +1086,18 @@ h3 {
   opacity: 0.85;
 }
 
+.fixture-timing {
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.fixture-timing span {
+  line-height: 1.35;
+}
+
 .fixture-preview {
   min-width: 0;
 }
@@ -1674,6 +1686,18 @@ h3 {
 }
 
 .fixture-advice.warning {
+  background: #fff4e8;
+  border: 1px solid #f0a24f;
+  color: #7a3c0b;
+}
+
+.fixture-timing.ok {
+  background: #ecf9e8;
+  border: 1px solid #a8e641;
+  color: #17451d;
+}
+
+.fixture-timing.warning {
   background: #fff4e8;
   border: 1px solid #f0a24f;
   color: #7a3c0b;

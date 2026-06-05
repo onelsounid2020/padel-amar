@@ -206,6 +206,7 @@ function App() {
     court_count: 11,
     courts: "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11",
     rental_minutes: 120,
+    warmup_minutes: 10,
     set_minutes: 20,
     start_time: "17:00",
   });
@@ -525,11 +526,12 @@ function App() {
   async function submitGenerateFixture() {
     await run(async () => {
       const courts = fixtureForm.courts.split(",").map((court) => court.trim()).filter(Boolean);
+      const timing = deriveFixtureTiming(selectedEvent?.schedule || eventForm.schedule, Number(fixtureForm.warmup_minutes || 0));
       await api.generateFixture(selectedEventId, Number(fixtureForm.guaranteed_matches), courts, {
         format: "groups",
         groupSize: Number(fixtureForm.group_size || 4),
         courtsPerGroup: 2,
-        startTime: fixtureForm.start_time || "17:00",
+        startTime: timing.fixtureStart || fixtureForm.start_time || "17:00",
         setMinutes: Number(fixtureForm.set_minutes || 22),
       });
     });
@@ -1466,7 +1468,8 @@ function EventsPage(props) {
   const finalMatches = categoriesWithFinals * 2;
   const estimatedMatches = Math.ceil((completePairsCount * Number(fixtureForm.guaranteed_matches || 0)) / 2);
   const estimatedMatchesWithFinals = estimatedMatches + finalMatches;
-  const slotsPerCourt = Math.max(1, Math.floor(Number(fixtureForm.rental_minutes || 0) / Number(fixtureForm.set_minutes || 1)));
+  const fixtureTiming = deriveFixtureTiming(selectedEvent?.schedule || eventForm.schedule, Number(fixtureForm.warmup_minutes || 0));
+  const slotsPerCourt = Math.max(1, Math.floor(Number(fixtureTiming.rentalMinutes || 0) / Number(fixtureForm.set_minutes || 1)));
   const recommendedCourts = estimatedMatches ? Math.ceil(estimatedMatches / slotsPerCourt) : 0;
   const recommendedCourtsWithFinals = estimatedMatchesWithFinals ? Math.ceil(estimatedMatchesWithFinals / slotsPerCourt) : 0;
   const configuredCourts = Number(fixtureForm.court_count || 0);
@@ -1659,16 +1662,16 @@ function EventsPage(props) {
                         <input type="number" min="1" value={fixtureForm.guaranteed_matches} onChange={(e) => setFixtureForm({ ...fixtureForm, guaranteed_matches: e.target.value })} />
                       </label>
                       <label>
-                        Arriendo minutos
-                        <input type="number" min="1" value={fixtureForm.rental_minutes} onChange={(e) => setFixtureForm({ ...fixtureForm, rental_minutes: e.target.value })} />
-                      </label>
-                      <label>
                         Minutos por set
                         <input type="number" min="1" value={fixtureForm.set_minutes} onChange={(e) => setFixtureForm({ ...fixtureForm, set_minutes: e.target.value })} />
                       </label>
                       <label>
-                        Hora inicio
-                        <input type="time" value={fixtureForm.start_time} onChange={(e) => setFixtureForm({ ...fixtureForm, start_time: e.target.value })} />
+                        Paleteo previo
+                        <select value={fixtureForm.warmup_minutes} onChange={(e) => setFixtureForm({ ...fixtureForm, warmup_minutes: e.target.value })}>
+                          <option value="0">Sin paleteo</option>
+                          <option value="5">5 minutos</option>
+                          <option value="10">10 minutos</option>
+                        </select>
                       </label>
                       <label>
                         Cantidad canchas
@@ -1690,6 +1693,17 @@ function EventsPage(props) {
                         Números de cancha
                         <input placeholder="1, 2, 3" value={fixtureForm.courts} onChange={(e) => setFixtureForm({ ...fixtureForm, courts: e.target.value })} />
                       </label>
+                      <div className={`fixture-timing wide-field ${fixtureTiming.valid ? "ok" : "warning"}`}>
+                        <strong>
+                          {fixtureTiming.valid
+                            ? `Primer partido ${fixtureTiming.fixtureStart} · bloque útil ${fixtureTiming.rentalMinutes} min`
+                            : "Define inicio y término en el tab Evento"}
+                        </strong>
+                        <span>
+                          Horario evento: {selectedEvent?.schedule || eventForm.schedule || "sin horario"}.
+                          {fixtureTiming.valid ? ` Paleteo: ${fixtureTiming.warmupMinutes} min antes de iniciar.` : " La programación usará ese horario automáticamente."}
+                        </span>
+                      </div>
                       <div className={`fixture-advice wide-field ${configuredCourts < recommendedCourtsWithFinals ? "warning" : "ok"}`}>
                         <strong>{recommendedCourtsWithFinals || 0} canchas recomendadas con finales</strong>
                         <span>
@@ -1732,8 +1746,8 @@ function EventsPage(props) {
                   setResultForm={setResultForm}
                   eventId={selectedEventId}
                   onChange={run}
-                  rentalMinutes={Number(fixtureForm.rental_minutes || 120)}
-                  startTime={fixtureForm.start_time}
+                  rentalMinutes={fixtureTiming.rentalMinutes || 0}
+                  startTime={fixtureTiming.fixtureStart || fixtureForm.start_time}
                 />
                 <DynamicFourTaPlan matches={matches} pairs={pairs} eventId={selectedEventId} onChange={run} />
                 <TournamentBracket matches={matches} pairs={pairs} />
@@ -1822,18 +1836,50 @@ function EventWhatsappBlock({ whatsapp, draftEvent }) {
 }
 
 function parseScheduleRange(value) {
-  const [start = "", end = ""] = (value || "")
-    .split(/\s*(?:-|a|hasta)\s*/i)
-    .map((part) => part.trim());
+  const [start = "", end = ""] = (value || "").match(/\d{1,2}:\d{2}/g) || [];
   return {
-    start: /^\d{2}:\d{2}$/.test(start) ? start : "",
-    end: /^\d{2}:\d{2}$/.test(end) ? end : "",
+    start: /^\d{1,2}:\d{2}$/.test(start) ? minutesToTime(timeToMinutes(start)) : "",
+    end: /^\d{1,2}:\d{2}$/.test(end) ? minutesToTime(timeToMinutes(end)) : "",
   };
 }
 
 function formatScheduleRange(start, end) {
   if (start && end) return `${start} - ${end}`;
   return start || end || "";
+}
+
+function timeToMinutes(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value || "");
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function minutesToTime(totalMinutes) {
+  const minutesInDay = 24 * 60;
+  const normalized = ((totalMinutes % minutesInDay) + minutesInDay) % minutesInDay;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function deriveFixtureTiming(schedule, warmupMinutes = 0) {
+  const { start, end } = parseScheduleRange(schedule);
+  const startMinutes = timeToMinutes(start);
+  let endMinutes = timeToMinutes(end);
+  const warmup = Math.max(0, Number(warmupMinutes || 0));
+  if (startMinutes === null || endMinutes === null) {
+    return { valid: false, eventStart: start, eventEnd: end, fixtureStart: "", rentalMinutes: 0, warmupMinutes: warmup };
+  }
+  if (endMinutes <= startMinutes) endMinutes += 24 * 60;
+  const fixtureStartMinutes = startMinutes + warmup;
+  return {
+    valid: true,
+    eventStart: start,
+    eventEnd: end,
+    fixtureStart: minutesToTime(fixtureStartMinutes),
+    rentalMinutes: Math.max(0, endMinutes - fixtureStartMinutes),
+    warmupMinutes: warmup,
+  };
 }
 
 function EventScheduleInputs({ value, onChange }) {
