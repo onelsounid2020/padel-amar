@@ -1821,13 +1821,6 @@ function EventWhatsappBlock({ whatsapp, draftEvent }) {
   );
 }
 
-function splitEventCategories(value) {
-  return (value || "")
-    .split(/\s*(?:\/|,)\s*/)
-    .map((category) => category.trim())
-    .filter(Boolean);
-}
-
 function parseScheduleRange(value) {
   const [start = "", end = ""] = (value || "")
     .split(/\s*(?:-|a|hasta)\s*/i)
@@ -1876,46 +1869,6 @@ function EventScheduleInputs({ value, onChange }) {
   );
 }
 
-function EventCategoryPicker({ selected, onChange }) {
-  function toggle(category) {
-    const nextSelected = selected.includes(category)
-      ? selected.filter((item) => item !== category)
-      : [...selected, category];
-    onChange(nextSelected);
-  }
-
-  return (
-    <div className="event-category-picker">
-      <div className="block-head">
-        <div>
-          <h3>Categorías</h3>
-          <p className="field-help">Selecciona categorías masculinas, femeninas o mixtas.</p>
-        </div>
-        <strong>{selected.length ? selected.join(" / ") : "Sin categorías"}</strong>
-      </div>
-      <div className="event-category-groups">
-        {eventCategoryGroups.map((group) => (
-          <section key={group.key}>
-            <span>{group.label}</span>
-            <div>
-              {group.categories.map((category) => (
-                <button
-                  type="button"
-                  className={selected.includes(category) ? "active" : ""}
-                  key={category}
-                  onClick={() => toggle(category)}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function EventCategorySelect({ value, onChange }) {
   const normalizedValue = allPadelCategories.includes(value) ? value : "";
 
@@ -1933,29 +1886,18 @@ function EventCategorySelect({ value, onChange }) {
   );
 }
 
+function summarizeConfigCategories(configs) {
+  const categories = configs.map((config) => config.category).filter(Boolean);
+  return categories.length ? [...new Set(categories)].join(" / ") : "";
+}
+
 function EventForm({ form, setForm, onSubmit, isEditing }) {
-  const selectedEventCategories = splitEventCategories(form.categories);
-
-  function setEventCategories(categories) {
-    const uniqueCategories = [...new Set(categories)].filter(Boolean);
-    const currentConfigs = form.category_configs || [];
-    const nextConfigs = uniqueCategories.map((category) => (
-      currentConfigs.find((config) => config.category === category) || { ...defaultCategoryConfig, category }
-    ));
-    setForm({
-      ...form,
-      categories: uniqueCategories.join(" / "),
-      category_configs: nextConfigs,
-    });
-  }
-
   function updateCategoryConfig(index, patch) {
     const configs = [...(form.category_configs || [])];
     configs[index] = { ...configs[index], ...patch };
-    const configCategories = configs.map((config) => config.category).filter(Boolean);
     setForm({
       ...form,
-      categories: configCategories.length ? [...new Set(configCategories)].join(" / ") : form.categories,
+      categories: summarizeConfigCategories(configs),
       category_configs: configs,
     });
   }
@@ -1965,7 +1907,12 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
   }
 
   function removeCategoryConfig(index) {
-    setForm({ ...form, category_configs: (form.category_configs || []).filter((_, itemIndex) => itemIndex !== index) });
+    const configs = (form.category_configs || []).filter((_, itemIndex) => itemIndex !== index);
+    setForm({
+      ...form,
+      categories: summarizeConfigCategories(configs),
+      category_configs: configs,
+    });
   }
 
   return (
@@ -1987,7 +1934,6 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <input placeholder="Club o sede" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} required />
           <small>Cancha, club o dirección corta.</small>
         </label>
-        <EventCategoryPicker selected={selectedEventCategories} onChange={setEventCategories} />
         <label className="form-field">
           <span>Precio</span>
           <input type="number" placeholder="13000" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
