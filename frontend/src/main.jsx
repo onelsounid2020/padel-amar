@@ -124,8 +124,17 @@ const publicPermissions = {
 
 const categoryOptions = {
   hombre: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
-  mujer: ["5taD+", "4taC+", "3raB+", "2daA+"],
+  mujer: ["5taD+", "5ta+", "4taC+", "4ta C+", "3raB+", "2daA+"],
+  mixto: ["Mixto A", "Mixto B", "Mixto C", "Mixto D", "Mixto 4ta", "Mixto 5ta", "Mixto 4ta C+/5ta+"],
 };
+
+const eventCategoryGroups = [
+  { key: "hombre", label: "Hombres", categories: categoryOptions.hombre },
+  { key: "mujer", label: "Mujeres", categories: categoryOptions.mujer },
+  { key: "mixto", label: "Mixto", categories: categoryOptions.mixto },
+];
+
+const allPadelCategories = eventCategoryGroups.flatMap((group) => group.categories);
 
 function categoryLabel(category) {
   return category;
@@ -1770,6 +1779,8 @@ function EventWhatsappBlock({ whatsapp, draftEvent }) {
   const [copied, setCopied] = useState(false);
   const draftMessage = useMemo(() => {
     const price = Number(draftEvent.price || 0);
+    const capacity = Math.max(0, Number(draftEvent.capacity || 0));
+    const registrationSlots = Array.from({ length: capacity }, (_, index) => `${index + 1}.`);
     return [
       draftEvent.name ? `*${draftEvent.name}*` : "*Nuevo evento AMAR*",
       draftEvent.date ? `Fecha: ${draftEvent.date}` : "",
@@ -1780,9 +1791,12 @@ function EventWhatsappBlock({ whatsapp, draftEvent }) {
       draftEvent.capacity ? `Cupos: ${draftEvent.capacity}` : "",
       "",
       "Inscripciones abiertas.",
-    ].filter((line) => line !== "").join("\n");
+      "",
+      "*Lista de inscritos*",
+      ...registrationSlots,
+    ].join("\n");
   }, [draftEvent]);
-  const message = whatsapp?.trim() || draftMessage;
+  const message = draftMessage || whatsapp?.trim() || "";
 
   async function copyMessage() {
     if (!message) return;
@@ -1807,11 +1821,143 @@ function EventWhatsappBlock({ whatsapp, draftEvent }) {
   );
 }
 
+function splitEventCategories(value) {
+  return (value || "")
+    .split(/\s*(?:\/|,)\s*/)
+    .map((category) => category.trim())
+    .filter(Boolean);
+}
+
+function parseScheduleRange(value) {
+  const [start = "", end = ""] = (value || "")
+    .split(/\s*(?:-|a|hasta)\s*/i)
+    .map((part) => part.trim());
+  return {
+    start: /^\d{2}:\d{2}$/.test(start) ? start : "",
+    end: /^\d{2}:\d{2}$/.test(end) ? end : "",
+  };
+}
+
+function formatScheduleRange(start, end) {
+  if (start && end) return `${start} - ${end}`;
+  return start || end || "";
+}
+
+function EventScheduleInputs({ value, onChange }) {
+  const { start, end } = parseScheduleRange(value);
+
+  function update(part, nextValue) {
+    const nextStart = part === "start" ? nextValue : start;
+    const nextEnd = part === "end" ? nextValue : end;
+    onChange(formatScheduleRange(nextStart, nextEnd));
+  }
+
+  return (
+    <div className="form-field schedule-field">
+      <span>Horario</span>
+      <div>
+        <input
+          aria-label="Hora de inicio"
+          type="time"
+          value={start}
+          onChange={(event) => update("start", event.target.value)}
+          required
+        />
+        <input
+          aria-label="Hora de término"
+          type="time"
+          value={end}
+          onChange={(event) => update("end", event.target.value)}
+          required
+        />
+      </div>
+      <small>Bloque horario del evento.</small>
+    </div>
+  );
+}
+
+function EventCategoryPicker({ selected, onChange }) {
+  function toggle(category) {
+    const nextSelected = selected.includes(category)
+      ? selected.filter((item) => item !== category)
+      : [...selected, category];
+    onChange(nextSelected);
+  }
+
+  return (
+    <div className="event-category-picker">
+      <div className="block-head">
+        <div>
+          <h3>Categorías</h3>
+          <p className="field-help">Selecciona categorías masculinas, femeninas o mixtas.</p>
+        </div>
+        <strong>{selected.length ? selected.join(" / ") : "Sin categorías"}</strong>
+      </div>
+      <div className="event-category-groups">
+        {eventCategoryGroups.map((group) => (
+          <section key={group.key}>
+            <span>{group.label}</span>
+            <div>
+              {group.categories.map((category) => (
+                <button
+                  type="button"
+                  className={selected.includes(category) ? "active" : ""}
+                  key={category}
+                  onClick={() => toggle(category)}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EventCategorySelect({ value, onChange }) {
+  const normalizedValue = allPadelCategories.includes(value) ? value : "";
+
+  return (
+    <select value={normalizedValue} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Categoría</option>
+      {eventCategoryGroups.map((group) => (
+        <optgroup key={group.key} label={group.label}>
+          {group.categories.map((category) => (
+            <option key={category} value={category}>{category}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
 function EventForm({ form, setForm, onSubmit, isEditing }) {
+  const selectedEventCategories = splitEventCategories(form.categories);
+
+  function setEventCategories(categories) {
+    const uniqueCategories = [...new Set(categories)].filter(Boolean);
+    const currentConfigs = form.category_configs || [];
+    const nextConfigs = uniqueCategories.map((category) => (
+      currentConfigs.find((config) => config.category === category) || { ...defaultCategoryConfig, category }
+    ));
+    setForm({
+      ...form,
+      categories: uniqueCategories.join(" / "),
+      category_configs: nextConfigs,
+    });
+  }
+
   function updateCategoryConfig(index, patch) {
     const configs = [...(form.category_configs || [])];
     configs[index] = { ...configs[index], ...patch };
-    setForm({ ...form, category_configs: configs });
+    const configCategories = configs.map((config) => config.category).filter(Boolean);
+    setForm({
+      ...form,
+      categories: configCategories.length ? [...new Set(configCategories)].join(" / ") : form.categories,
+      category_configs: configs,
+    });
   }
 
   function addCategoryConfig(config = defaultCategoryConfig) {
@@ -1841,21 +1987,13 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <input placeholder="Club o sede" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} required />
           <small>Cancha, club o dirección corta.</small>
         </label>
-        <label className="form-field">
-          <span>Categorías</span>
-          <input placeholder="4ta / 5ta" value={form.categories} onChange={(e) => setForm({ ...form, categories: e.target.value })} required />
-          <small>Texto resumen de categorías.</small>
-        </label>
+        <EventCategoryPicker selected={selectedEventCategories} onChange={setEventCategories} />
         <label className="form-field">
           <span>Precio</span>
           <input type="number" placeholder="13000" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
           <small>Valor por jugador o inscripción, según tu criterio.</small>
         </label>
-        <label className="form-field">
-          <span>Horario</span>
-          <input placeholder="21:00 a 23:00" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} required />
-          <small>Bloque horario del evento.</small>
-        </label>
+        <EventScheduleInputs value={form.schedule} onChange={(schedule) => setForm({ ...form, schedule })} />
         <label className="form-field">
           <span>Cupos</span>
           <input type="number" placeholder="56" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
@@ -1893,10 +2031,9 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
                 <div className="category-config-row" key={`${config.category}-${index}`}>
                   <label className="form-field compact">
                     <span>Categoría</span>
-                    <input
-                      placeholder="5ta"
+                    <EventCategorySelect
                       value={config.category}
-                      onChange={(e) => updateCategoryConfig(index, { category: e.target.value })}
+                      onChange={(category) => updateCategoryConfig(index, { category })}
                     />
                   </label>
                   <label className="form-field compact">

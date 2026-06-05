@@ -588,6 +588,79 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.schedule-field > div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.event-category-picker {
+  background: #f4fbfe;
+  border: 1px solid #c7d9e4;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  padding: 12px;
+}
+
+.event-category-picker .block-head {
+  margin-bottom: 0;
+}
+
+.event-category-picker .block-head h3 {
+  margin-bottom: 0;
+}
+
+.event-category-picker .block-head strong {
+  background: #e6f5ff;
+  border: 1px solid #b8d6e5;
+  border-radius: 999px;
+  color: #0a3154;
+  font-size: 0.82rem;
+  padding: 7px 10px;
+}
+
+.event-category-groups {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.event-category-groups section {
+  display: grid;
+  gap: 7px;
+}
+
+.event-category-groups span {
+  color: #0e5d8f;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.event-category-groups div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-category-groups button {
+  background: #fffefa;
+  border: 1px solid #c7d9e4;
+  box-shadow: none;
+  color: #0a3154;
+  min-height: 34px;
+  padding: 0 10px;
+  width: auto;
+}
+
+.event-category-groups button.active {
+  background: #0f6ea8;
+  border-color: #0f6ea8;
+  color: #ffffff;
+}
+
 .event-active-toggle {
   align-items: center;
   background: #f4fbfe;
@@ -3001,6 +3074,10 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .event-category-groups {
+    grid-template-columns: 1fr;
+  }
+
   .user-form-grid,
   .user-row,
   .signup-form,
@@ -3077,6 +3154,7 @@ h3 {
   .event-form-grid,
   .registration-form,
   .compact-form,
+  .schedule-field > div,
   .scoreboard,
   .ranking-row {
     grid-template-columns: 1fr;
