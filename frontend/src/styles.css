@@ -1017,7 +1017,8 @@ h3 {
 }
 
 .fixture-config,
-.manual-match {
+.manual-match,
+.manual-planner {
   border: 1px solid #c7d9e4;
   border-radius: 8px;
   margin-bottom: 12px;
@@ -1027,7 +1028,8 @@ h3 {
 }
 
 .fixture-config summary,
-.manual-match summary {
+.manual-match summary,
+.manual-planner summary {
   background: #f4fbfe;
   color: #0a3154;
   cursor: pointer;
@@ -1040,6 +1042,168 @@ h3 {
   border: 0;
   border-radius: 0;
   margin-bottom: 0;
+}
+
+.manual-planner-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.planner-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(170px, 1.2fr) repeat(3, minmax(92px, 0.55fr)) minmax(170px, 0.8fr) auto auto auto;
+}
+
+.planner-toolbar label {
+  color: #0e5d8f;
+  display: grid;
+  font-size: 0.78rem;
+  font-weight: 900;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+.planner-toolbar button {
+  width: auto;
+}
+
+.planner-check {
+  align-items: center;
+  background: #f7fbfd;
+  border: 1px solid #d9e8f0;
+  border-radius: 8px;
+  color: #0a3154;
+  display: flex !important;
+  gap: 8px !important;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  text-transform: none !important;
+}
+
+.planner-check input {
+  accent-color: #13a66f;
+  height: 18px;
+  min-height: 18px;
+  width: 18px;
+}
+
+.planner-check span {
+  white-space: nowrap;
+}
+
+.planner-validation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planner-validation span {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 6px 10px;
+}
+
+.planner-validation .ok {
+  background: #ecf9e8;
+  border: 1px solid #a8e641;
+  color: #17451d;
+}
+
+.planner-validation .warning {
+  background: #fff4e8;
+  border: 1px solid #f0a24f;
+  color: #7a3c0b;
+}
+
+.planner-issues {
+  background: #fff4e8;
+  border: 1px solid #f0a24f;
+  border-radius: 8px;
+  color: #7a3c0b;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.planner-issues p {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.manual-planner-grid-wrap {
+  background: #fffefa;
+  border: 1px solid #c7d9e4;
+  border-radius: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.manual-planner-grid {
+  min-width: 100%;
+  width: max-content;
+}
+
+.planner-row {
+  display: grid;
+  grid-template-columns: 112px repeat(var(--planner-courts), 220px);
+}
+
+.planner-head {
+  background: #eaf7fb;
+  color: #0a3154;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.planner-head span {
+  border-right: 1px solid #c7d9e4;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 9px 8px;
+  text-transform: uppercase;
+}
+
+.planner-round-cell,
+.planner-slot {
+  border-right: 1px solid #d9e8f0;
+  border-top: 1px solid #d9e8f0;
+  min-height: 112px;
+}
+
+.planner-round-cell {
+  background: #f7fbfd;
+  color: #08223b;
+  display: grid;
+  gap: 4px;
+  padding: 10px 8px;
+}
+
+.planner-round-cell strong {
+  font-size: 1.05rem;
+}
+
+.planner-round-cell span {
+  color: #5b6d67;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.planner-slot {
+  background: #fffefa;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.planner-slot select {
+  min-height: 38px;
+  padding: 7px 8px;
 }
 
 .fixture-workbench {
@@ -3001,7 +3165,8 @@ h3 {
   .payments-grid,
   .fixture-workbench,
   .fixture-category-grid,
-  .fixture-focus {
+  .fixture-focus,
+  .planner-toolbar {
     grid-template-columns: 1fr;
   }
 

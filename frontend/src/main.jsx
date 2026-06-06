@@ -7,10 +7,12 @@ import {
   CreditCard,
   ExternalLink,
   FileCheck2,
+  Grid2X2,
   Check,
   ListChecks,
   Medal,
   RefreshCw,
+  Save,
   Swords,
   UserPlus,
   Users,
@@ -1726,6 +1728,14 @@ function EventsPage(props) {
                       )}
                     </div>
                     </details>
+                    <ManualFixturePlanner
+                      eventId={selectedEventId}
+                      pairs={pairs}
+                      matches={matches}
+                      fixtureForm={fixtureForm}
+                      setFixtureForm={setFixtureForm}
+                      run={run}
+                    />
                     <details className="manual-match">
                       <summary>Agregar partido manual</summary>
                     <form onSubmit={submitMatch} className="compact-form">
@@ -3084,6 +3094,313 @@ function resolveMatchResult(match) {
   return oneScore > twoScore
     ? { winnerId: match.pair_one_id, loserId: match.pair_two_id }
     : { winnerId: match.pair_two_id, loserId: match.pair_one_id };
+}
+
+function buildEmptyPlannerGrid(roundCount, courtCount) {
+  return Array.from({ length: Math.max(1, Number(roundCount) || 1) }, () =>
+    Array.from({ length: Math.max(1, Number(courtCount) || 1) }, () => ({ pair_one_id: "", pair_two_id: "" }))
+  );
+}
+
+function pairCategoryOptions(pairs) {
+  return [...new Set(pairs.filter((pair) => pair.status === "completa" && pair.player_two_id).map((pair) => pair.category))]
+    .filter(Boolean)
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+}
+
+function matchupKey(oneId, twoId) {
+  return [Number(oneId), Number(twoId)].sort((a, b) => a - b).join("-");
+}
+
+function roundRobinMatches(pairIds) {
+  if (pairIds.length < 2) return [];
+  const teams = [...pairIds];
+  if (teams.length % 2 === 1) teams.push(null);
+  const rounds = [];
+
+  for (let roundIndex = 0; roundIndex < teams.length - 1; roundIndex += 1) {
+    const round = [];
+    for (let index = 0; index < teams.length / 2; index += 1) {
+      const one = teams[index];
+      const two = teams[teams.length - 1 - index];
+      if (one && two) round.push({ pair_one_id: String(one), pair_two_id: String(two) });
+    }
+    rounds.push(round);
+    teams.splice(1, 0, teams.pop());
+  }
+  return rounds;
+}
+
+function plannerTimeSlot(roundIndex, setMinutes, startTime) {
+  const start = minutesFromSlot(startTime || "10:30");
+  const slotStart = (start === 9999 ? 630 : start) + (roundIndex * Number(setMinutes || 20));
+  const slotEnd = slotStart + Number(setMinutes || 20);
+  return `${String(Math.floor(slotStart / 60)).padStart(2, "0")}:${String(slotStart % 60).padStart(2, "0")}-${String(Math.floor(slotEnd / 60)).padStart(2, "0")}:${String(slotEnd % 60).padStart(2, "0")}`;
+}
+
+function plannerRows(grid, courts, category, setMinutes, startTime) {
+  return grid.flatMap((round, roundIndex) => round.map((slot, courtIndex) => {
+    const time = plannerTimeSlot(roundIndex, setMinutes, startTime);
+    return {
+      ...slot,
+      court: courts[courtIndex] || String(courtIndex + 1),
+      courtIndex,
+      roundIndex,
+      roundName: `${category || "Categoria"} - Programacion manual - Ronda ${roundIndex + 1} - ${time}`,
+      time,
+    };
+  }));
+}
+
+function validatePlanner(grid, pairs, matches, options) {
+  const rows = plannerRows(grid, options.courts, options.category, options.setMinutes, options.startTime);
+  const plannedRows = rows.filter((row) => row.pair_one_id || row.pair_two_id);
+  const completeRows = rows.filter((row) => row.pair_one_id && row.pair_two_id && row.pair_one_id !== row.pair_two_id);
+  const pairById = Object.fromEntries(pairs.map((pair) => [pair.id, pair]));
+  const issues = [];
+  const matchupCounts = new Map();
+  const playedCounts = new Map();
+  const roundPlayers = new Map();
+
+  for (const row of plannedRows) {
+    if (!row.pair_one_id || !row.pair_two_id) {
+      issues.push(`Ronda ${row.roundIndex + 1}, cancha ${row.court}: falta una pareja.`);
+      continue;
+    }
+    if (row.pair_one_id === row.pair_two_id) {
+      issues.push(`Ronda ${row.roundIndex + 1}, cancha ${row.court}: una pareja no puede jugar contra si misma.`);
+      continue;
+    }
+    const one = pairById[Number(row.pair_one_id)];
+    const two = pairById[Number(row.pair_two_id)];
+    if (options.category && (one?.category !== options.category || two?.category !== options.category)) {
+      issues.push(`Ronda ${row.roundIndex + 1}, cancha ${row.court}: hay parejas fuera de ${options.category}.`);
+    }
+    const inRound = roundPlayers.get(row.roundIndex) || new Set();
+    for (const pairId of [row.pair_one_id, row.pair_two_id]) {
+      if (inRound.has(pairId)) {
+        issues.push(`Ronda ${row.roundIndex + 1}: ${pairName(pairById[Number(pairId)])} aparece mas de una vez.`);
+      }
+      inRound.add(pairId);
+      playedCounts.set(pairId, (playedCounts.get(pairId) || 0) + 1);
+    }
+    roundPlayers.set(row.roundIndex, inRound);
+    const key = matchupKey(row.pair_one_id, row.pair_two_id);
+    matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
+  }
+
+  for (const [key, count] of matchupCounts.entries()) {
+    if (count > 1) issues.push(`Cruce repetido en planner: ${key}.`);
+  }
+
+  {
+    const existingKeys = new Set(
+      matches
+        .filter((match) => !options.replaceUnplayed || hasResult(match))
+        .map((match) => matchupKey(match.pair_one_id, match.pair_two_id))
+    );
+    for (const row of completeRows) {
+      if (existingKeys.has(matchupKey(row.pair_one_id, row.pair_two_id))) {
+        issues.push(`Ya existe ${pairName(pairById[Number(row.pair_one_id)])} vs ${pairName(pairById[Number(row.pair_two_id)])}.`);
+      }
+    }
+  }
+
+  const activePairIds = pairs
+    .filter((pair) => pair.status === "completa" && pair.player_two_id && (!options.category || pair.category === options.category))
+    .map((pair) => String(pair.id));
+  const allPossibleKeys = [];
+  activePairIds.forEach((oneId, index) => {
+    activePairIds.slice(index + 1).forEach((twoId) => allPossibleKeys.push(matchupKey(oneId, twoId)));
+  });
+  const missingRoundRobin = allPossibleKeys.filter((key) => !matchupCounts.has(key));
+  const balancedCounts = activePairIds.map((id) => playedCounts.get(id) || 0);
+  const minGames = balancedCounts.length ? Math.min(...balancedCounts) : 0;
+  const maxGames = balancedCounts.length ? Math.max(...balancedCounts) : 0;
+
+  return {
+    completeRows,
+    issues,
+    missingRoundRobin,
+    minGames,
+    maxGames,
+    plannedCount: completeRows.length,
+    totalRoundRobin: allPossibleKeys.length,
+  };
+}
+
+function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixtureForm, run }) {
+  const categories = pairCategoryOptions(pairs);
+  const [category, setCategory] = useState("");
+  const [roundCount, setRoundCount] = useState(5);
+  const [courtCount, setCourtCount] = useState(3);
+  const [replaceUnplayed, setReplaceUnplayed] = useState(true);
+  const [grid, setGrid] = useState(() => buildEmptyPlannerGrid(5, 3));
+  const activeCategory = category || categories[0] || "";
+  const categoryPairs = pairs
+    .filter((pair) => pair.status === "completa" && pair.player_two_id && (!activeCategory || pair.category === activeCategory))
+    .sort((a, b) => (a.seed || 9999) - (b.seed || 9999) || a.id - b.id);
+  const rawCourts = (fixtureForm.courts || "").split(",").map((court) => court.trim()).filter(Boolean);
+  const normalizedCourts = Array.from({ length: courtCount }, (_, index) => rawCourts[index] || String(index + 1));
+  const startTime = fixtureForm.start_time || "10:30";
+  const validation = validatePlanner(grid, pairs, matches, {
+    category: activeCategory,
+    courts: normalizedCourts,
+    replaceUnplayed,
+    setMinutes: Number(fixtureForm.set_minutes || 20),
+    startTime,
+  });
+
+  useEffect(() => {
+    if (!category && categories[0]) setCategory(categories[0]);
+  }, [categories.join("|")]);
+
+  function resize(nextRounds, nextCourts) {
+    const rounds = Math.max(1, Number(nextRounds) || 1);
+    const courts = Math.max(1, Number(nextCourts) || 1);
+    setRoundCount(rounds);
+    setCourtCount(courts);
+    setGrid((current) => Array.from({ length: rounds }, (_, roundIndex) =>
+      Array.from({ length: courts }, (_, courtIndex) => current[roundIndex]?.[courtIndex] || { pair_one_id: "", pair_two_id: "" })
+    ));
+  }
+
+  function updateSlot(roundIndex, courtIndex, patch) {
+    setGrid((current) => current.map((round, currentRound) =>
+      round.map((slot, currentCourt) => (
+        currentRound === roundIndex && currentCourt === courtIndex ? { ...slot, ...patch } : slot
+      ))
+    ));
+  }
+
+  function fillRoundRobin() {
+    const pairIds = categoryPairs.map((pair) => pair.id);
+    const rounds = roundRobinMatches(pairIds);
+    const recommendedCourts = Math.max(1, Math.ceil(pairIds.length / 2));
+    const nextRounds = Math.max(1, rounds.length);
+    setRoundCount(nextRounds);
+    setCourtCount(recommendedCourts);
+    setFixtureForm({
+      ...fixtureForm,
+      court_count: recommendedCourts,
+      courts: Array.from({ length: recommendedCourts }, (_, index) => String(index + 1)).join(", "),
+    });
+    setGrid(buildEmptyPlannerGrid(nextRounds, recommendedCourts).map((round, roundIndex) =>
+      round.map((slot, courtIndex) => rounds[roundIndex]?.[courtIndex] || slot)
+    ));
+  }
+
+  function clearGrid() {
+    setGrid(buildEmptyPlannerGrid(roundCount, courtCount));
+  }
+
+  async function savePlanner() {
+    await run(async () => {
+      const payload = validation.completeRows.map((row) => ({
+        pair_one_id: Number(row.pair_one_id),
+        pair_two_id: Number(row.pair_two_id),
+        round_name: row.roundName,
+        court: row.court,
+      }));
+      await api.createMatchesBulk(eventId, payload, replaceUnplayed);
+    });
+  }
+
+  const canSave = eventId && validation.plannedCount > 0 && validation.issues.length === 0;
+
+  return (
+    <details className="manual-planner" open={!matches.length}>
+      <summary>Planner manual por rondas y canchas</summary>
+      <div className="manual-planner-body">
+        <div className="planner-toolbar">
+          <label>
+            Categoría
+            <select value={activeCategory} onChange={(event) => setCategory(event.target.value)}>
+              {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Rondas
+            <input type="number" min="1" value={roundCount} onChange={(event) => resize(event.target.value, courtCount)} />
+          </label>
+          <label>
+            Canchas
+            <input type="number" min="1" value={courtCount} onChange={(event) => resize(roundCount, event.target.value)} />
+          </label>
+          <label>
+            Minutos
+            <input
+              type="number"
+              min="1"
+              value={fixtureForm.set_minutes}
+              onChange={(event) => setFixtureForm({ ...fixtureForm, set_minutes: event.target.value })}
+            />
+          </label>
+          <label className="planner-check">
+            <input type="checkbox" checked={replaceUnplayed} onChange={(event) => setReplaceUnplayed(event.target.checked)} />
+            <span>Reemplazar sin resultado</span>
+          </label>
+          <button type="button" className="secondary-action" onClick={fillRoundRobin} disabled={categoryPairs.length < 2}>
+            <Grid2X2 size={16} /> Proponer todos contra todos
+          </button>
+          <button type="button" className="secondary-action" onClick={clearGrid}>
+            Limpiar
+          </button>
+          <button type="button" onClick={savePlanner} disabled={!canSave}>
+            <Save size={16} /> Guardar {validation.plannedCount}
+          </button>
+        </div>
+
+        <div className="planner-validation">
+          <span className={validation.issues.length ? "warning" : "ok"}>
+            {validation.issues.length ? `${validation.issues.length} alerta(s)` : "Sin conflictos"}
+          </span>
+          <span className={validation.missingRoundRobin.length ? "warning" : "ok"}>
+            {validation.plannedCount}/{validation.totalRoundRobin} cruces todos contra todos
+          </span>
+          <span className={validation.minGames === validation.maxGames ? "ok" : "warning"}>
+            {validation.minGames}-{validation.maxGames} partidos por pareja
+          </span>
+        </div>
+
+        {validation.issues.length > 0 && (
+          <div className="planner-issues">
+            {validation.issues.slice(0, 6).map((issue) => <p key={issue}>{issue}</p>)}
+            {validation.issues.length > 6 && <p>{validation.issues.length - 6} alertas mas.</p>}
+          </div>
+        )}
+
+        <div className="manual-planner-grid-wrap">
+          <div className="manual-planner-grid" style={{ "--planner-courts": courtCount }}>
+            <div className="planner-row planner-head">
+              <span>Ronda</span>
+              {normalizedCourts.map((court, index) => <span key={`${court}-${index}`}>{normalizeCourt(court)}</span>)}
+            </div>
+            {grid.map((round, roundIndex) => (
+              <div className="planner-row" key={`round-${roundIndex}`}>
+                <div className="planner-round-cell">
+                  <strong>R{roundIndex + 1}</strong>
+                  <span>{plannerTimeSlot(roundIndex, fixtureForm.set_minutes, startTime)}</span>
+                </div>
+                {round.map((slot, courtIndex) => (
+                  <div className="planner-slot" key={`slot-${roundIndex}-${courtIndex}`}>
+                    <select value={slot.pair_one_id} onChange={(event) => updateSlot(roundIndex, courtIndex, { pair_one_id: event.target.value })}>
+                      <option value="">Pareja 1</option>
+                      {categoryPairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)}</option>)}
+                    </select>
+                    <select value={slot.pair_two_id} onChange={(event) => updateSlot(roundIndex, courtIndex, { pair_two_id: event.target.value })}>
+                      <option value="">Pareja 2</option>
+                      {categoryPairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 function DynamicFourTaPlan({ matches, pairs, eventId, onChange }) {
