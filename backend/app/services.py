@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from app.models.event import Event
@@ -537,6 +537,9 @@ def generate_tournament_bracket(
 
 
 def recalculate_standings(db: Session, event_id: int) -> list[Standing]:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": 910000 + int(event_id)})
+
     db.execute(delete(Standing).where(Standing.event_id == event_id))
     db.flush()
 
