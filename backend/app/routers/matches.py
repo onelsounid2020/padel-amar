@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.auth import current_user, require_permission, role_permissions
@@ -8,7 +8,7 @@ from app.models.match import Match
 from app.models.player import EventPair
 from app.models.result_submission import MatchResultSubmission, ResultSubmissionStatus
 from app.models.user import User
-from app.schemas.matches import MatchCreate, MatchRead, MatchResultUpdate, ResultSubmissionCreate, ResultSubmissionRead
+from app.schemas.matches import MatchBulkCreate, MatchCreate, MatchRead, MatchResultUpdate, ResultSubmissionCreate, ResultSubmissionRead
 from app.services import generate_fixture, generate_group_fixture, generate_tournament_bracket, recalculate_standings
 
 router = APIRouter(prefix="/events/{event_id}/matches", tags=["matches"])
@@ -26,6 +26,34 @@ def create_match(
     db.commit()
     db.refresh(match)
     return match
+
+
+@router.post("/bulk", response_model=list[MatchRead], status_code=201)
+def create_matches_bulk(
+    event_id: int,
+    payload: MatchBulkCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> list[Match]:
+    if not payload.matches:
+        raise HTTPException(status_code=400, detail="Agrega al menos un partido")
+    if payload.replace_unplayed:
+        db.execute(
+            delete(Match).where(
+                Match.event_id == event_id,
+                Match.pair_one_score.is_(None),
+                Match.pair_two_score.is_(None),
+            )
+        )
+        db.flush()
+    created = []
+    for item in payload.matches:
+        match = Match(event_id=event_id, **item.model_dump())
+        db.add(match)
+        db.flush()
+        created.append(match)
+    db.commit()
+    return created
 
 
 @router.get("", response_model=list[MatchRead])

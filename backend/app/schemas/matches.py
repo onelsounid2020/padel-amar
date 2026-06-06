@@ -16,6 +16,11 @@ class MatchCreate(BaseModel):
     played_at: datetime | None = None
 
 
+class MatchBulkCreate(BaseModel):
+    matches: list[MatchCreate]
+    replace_unplayed: bool = False
+
+
 class MatchResultUpdate(BaseModel):
     pair_one_score: int
     pair_two_score: int
