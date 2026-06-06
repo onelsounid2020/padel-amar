@@ -3131,6 +3131,14 @@ function roundRobinMatches(pairIds) {
   return rounds;
 }
 
+function parseCourtList(value) {
+  const courts = String(value || "")
+    .split(",")
+    .map((court) => court.trim())
+    .filter(Boolean);
+  return courts.length ? courts : ["1"];
+}
+
 function plannerTimeSlot(roundIndex, setMinutes, startTime) {
   const start = minutesFromSlot(startTime || "10:30");
   const slotStart = (start === 9999 ? 630 : start) + (roundIndex * Number(setMinutes || 20));
@@ -3233,15 +3241,15 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   const categories = pairCategoryOptions(pairs);
   const [category, setCategory] = useState("");
   const [roundCount, setRoundCount] = useState(5);
-  const [courtCount, setCourtCount] = useState(3);
+  const [courtInput, setCourtInput] = useState(parseCourtList(fixtureForm.courts).slice(0, 3).join(", "));
   const [replaceUnplayed, setReplaceUnplayed] = useState(true);
   const [grid, setGrid] = useState(() => buildEmptyPlannerGrid(5, 3));
+  const normalizedCourts = parseCourtList(courtInput);
+  const courtCount = normalizedCourts.length;
   const activeCategory = category || categories[0] || "";
   const categoryPairs = pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id && (!activeCategory || pair.category === activeCategory))
     .sort((a, b) => (a.seed || 9999) - (b.seed || 9999) || a.id - b.id);
-  const rawCourts = (fixtureForm.courts || "").split(",").map((court) => court.trim()).filter(Boolean);
-  const normalizedCourts = Array.from({ length: courtCount }, (_, index) => rawCourts[index] || String(index + 1));
   const startTime = fixtureForm.start_time || "10:30";
   const validation = validatePlanner(grid, pairs, matches, {
     category: activeCategory,
@@ -3255,14 +3263,24 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     if (!category && categories[0]) setCategory(categories[0]);
   }, [categories.join("|")]);
 
-  function resize(nextRounds, nextCourts) {
+  function resize(nextRounds, nextCourtCount = courtCount) {
     const rounds = Math.max(1, Number(nextRounds) || 1);
-    const courts = Math.max(1, Number(nextCourts) || 1);
+    const courts = Math.max(1, Number(nextCourtCount) || 1);
     setRoundCount(rounds);
-    setCourtCount(courts);
     setGrid((current) => Array.from({ length: rounds }, (_, roundIndex) =>
       Array.from({ length: courts }, (_, courtIndex) => current[roundIndex]?.[courtIndex] || { pair_one_id: "", pair_two_id: "" })
     ));
+  }
+
+  function updateCourts(value) {
+    const nextCourts = parseCourtList(value);
+    setCourtInput(value);
+    setFixtureForm({
+      ...fixtureForm,
+      court_count: nextCourts.length,
+      courts: nextCourts.join(", "),
+    });
+    resize(roundCount, nextCourts.length);
   }
 
   function updateSlot(roundIndex, courtIndex, patch) {
@@ -3275,18 +3293,17 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
 
   function fillRoundRobin() {
     const pairIds = categoryPairs.map((pair) => pair.id);
-    const rounds = roundRobinMatches(pairIds);
-    const recommendedCourts = Math.max(1, Math.ceil(pairIds.length / 2));
-    const nextRounds = Math.max(1, rounds.length);
+    const matchesByRound = roundRobinMatches(pairIds);
+    const flatMatches = matchesByRound.flat();
+    const nextRounds = Math.max(1, Math.ceil(flatMatches.length / courtCount));
     setRoundCount(nextRounds);
-    setCourtCount(recommendedCourts);
     setFixtureForm({
       ...fixtureForm,
-      court_count: recommendedCourts,
-      courts: Array.from({ length: recommendedCourts }, (_, index) => String(index + 1)).join(", "),
+      court_count: courtCount,
+      courts: normalizedCourts.join(", "),
     });
-    setGrid(buildEmptyPlannerGrid(nextRounds, recommendedCourts).map((round, roundIndex) =>
-      round.map((slot, courtIndex) => rounds[roundIndex]?.[courtIndex] || slot)
+    setGrid(buildEmptyPlannerGrid(nextRounds, courtCount).map((round, roundIndex) =>
+      round.map((slot, courtIndex) => flatMatches[(roundIndex * courtCount) + courtIndex] || slot)
     ));
   }
 
@@ -3323,9 +3340,9 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
             Rondas
             <input type="number" min="1" value={roundCount} onChange={(event) => resize(event.target.value, courtCount)} />
           </label>
-          <label>
+          <label className="planner-courts-field">
             Canchas
-            <input type="number" min="1" value={courtCount} onChange={(event) => resize(roundCount, event.target.value)} />
+            <input placeholder="1, 3, 5" value={courtInput} onChange={(event) => updateCourts(event.target.value)} />
           </label>
           <label>
             Minutos
