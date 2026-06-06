@@ -1734,6 +1734,7 @@ function EventsPage(props) {
                       matches={matches}
                       fixtureForm={fixtureForm}
                       setFixtureForm={setFixtureForm}
+                      startTime={fixtureTiming.fixtureStart || fixtureForm.start_time}
                       run={run}
                     />
                     <details className="manual-match">
@@ -3237,7 +3238,7 @@ function validatePlanner(grid, pairs, matches, options) {
   };
 }
 
-function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixtureForm, run }) {
+function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixtureForm, startTime, run }) {
   const categories = pairCategoryOptions(pairs);
   const [category, setCategory] = useState("");
   const [roundCount, setRoundCount] = useState(5);
@@ -3250,13 +3251,13 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   const categoryPairs = pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id && (!activeCategory || pair.category === activeCategory))
     .sort((a, b) => (a.seed || 9999) - (b.seed || 9999) || a.id - b.id);
-  const startTime = fixtureForm.start_time || "10:30";
+  const plannerStartTime = startTime || fixtureForm.start_time || "10:30";
   const validation = validatePlanner(grid, pairs, matches, {
     category: activeCategory,
     courts: normalizedCourts,
     replaceUnplayed,
     setMinutes: Number(fixtureForm.set_minutes || 20),
-    startTime,
+    startTime: plannerStartTime,
   });
 
   useEffect(() => {
@@ -3340,6 +3341,10 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
             Rondas
             <input type="number" min="1" value={roundCount} onChange={(event) => resize(event.target.value, courtCount)} />
           </label>
+          <label>
+            Inicio
+            <input value={plannerStartTime} readOnly />
+          </label>
           <label className="planner-courts-field">
             Canchas
             <input placeholder="1, 3, 5" value={courtInput} onChange={(event) => updateCourts(event.target.value)} />
@@ -3397,7 +3402,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
               <div className="planner-row" key={`round-${roundIndex}`}>
                 <div className="planner-round-cell">
                   <strong>R{roundIndex + 1}</strong>
-                  <span>{plannerTimeSlot(roundIndex, fixtureForm.set_minutes, startTime)}</span>
+                  <span>{plannerTimeSlot(roundIndex, fixtureForm.set_minutes, plannerStartTime)}</span>
                 </div>
                 {round.map((slot, courtIndex) => (
                   <div className="planner-slot" key={`slot-${roundIndex}-${courtIndex}`}>
