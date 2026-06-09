@@ -309,6 +309,28 @@ h3 {
   gap: 12px;
 }
 
+.login-register-callout {
+  align-items: center;
+  background: #f4fbfe;
+  border: 1px solid #c7d9e4;
+  border-left: 5px solid #13a66f;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.login-register-callout span {
+  color: #0a3154;
+  font-weight: 900;
+}
+
+.login-register-callout button {
+  min-height: 38px;
+  width: auto;
+}
+
 .signup-page {
   display: grid;
   padding: 20px 0;

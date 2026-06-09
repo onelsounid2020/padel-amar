@@ -161,13 +161,33 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || "").trim());
 }
 
+function playerIdentityKey(player) {
+  if (!player) return "";
+  if (player.user_id) return `user:${player.user_id}`;
+  if (player.email) return `email:${String(player.email).trim().toLowerCase()}`;
+  return `name:${String(player.name || "").trim().replace(/\s+/g, " ").toLowerCase()}`;
+}
+
 function mergePlayersFromPairs(players, pairs) {
-  const byId = new Map(players.map((player) => [player.id, player]));
+  const byIdentity = new Map();
+  function addPlayer(player) {
+    const key = playerIdentityKey(player);
+    if (!key) return;
+    const current = byIdentity.get(key);
+    if (!current) {
+      byIdentity.set(key, player);
+      return;
+    }
+    if (!current.user_id && player.user_id) {
+      byIdentity.set(key, player);
+    }
+  }
+  players.forEach(addPlayer);
   pairs.forEach((pair) => {
-    if (pair.player_one && !byId.has(pair.player_one.id)) byId.set(pair.player_one.id, pair.player_one);
-    if (pair.player_two && !byId.has(pair.player_two.id)) byId.set(pair.player_two.id, pair.player_two);
+    addPlayer(pair.player_one);
+    addPlayer(pair.player_two);
   });
-  return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return [...byIdentity.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function pageFromLocation() {
@@ -1130,7 +1150,7 @@ function App() {
     return (
       <main className="app-shell">
         {error && <div className="alert">{error}</div>}
-        <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} />
+        <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} goSignup={() => navigatePage("signup")} />
       </main>
     );
   }
@@ -1205,7 +1225,7 @@ function ConfirmModal({ dialog, setDialog, loading }) {
   );
 }
 
-function LoginPage({ form, setForm, onSubmit, loading, compact = false }) {
+function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup }) {
   return (
     <section className={compact ? "login-page compact" : "login-page"}>
       <div className="login-card">
@@ -1237,6 +1257,14 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false }) {
           </label>
           <button disabled={loading}>Entrar</button>
         </form>
+        {!compact && goSignup && (
+          <div className="login-register-callout">
+            <span>No tienes cuenta?</span>
+            <button type="button" className="secondary-action" onClick={goSignup}>
+              Crear cuenta
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
