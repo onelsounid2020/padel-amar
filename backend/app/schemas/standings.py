@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.schemas.common import ORMModel
-from app.schemas.players import PairRead
+from app.schemas.players import PairPublicRead
 
 
 class StandingRead(ORMModel):
@@ -15,4 +15,4 @@ class StandingRead(ORMModel):
     points_against: int
     points: int
     position: int | None
-    pair: PairRead
+    pair: PairPublicRead

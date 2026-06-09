@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.player import PairStatus, PreferredSide
 from app.schemas.common import ORMModel
@@ -30,6 +30,7 @@ class PairCreate(BaseModel):
     player_one_id: int
     player_two_id: int | None = None
     category: str
+    skill_level: int = Field(default=5, ge=1, le=10)
     status: PairStatus = PairStatus.buscando_partner
     seed: int | None = None
 
@@ -38,11 +39,12 @@ class PairUpdate(BaseModel):
     player_one_id: int | None = None
     player_two_id: int | None = None
     category: str | None = None
+    skill_level: int | None = Field(default=None, ge=1, le=10)
     status: PairStatus | None = None
     seed: int | None = None
 
 
-class PairRead(ORMModel):
+class PairPublicRead(ORMModel):
     id: int
     event_id: int
     player_one_id: int
@@ -53,3 +55,7 @@ class PairRead(ORMModel):
     created_at: datetime
     player_one: PlayerRead
     player_two: PlayerRead | None = None
+
+
+class PairRead(PairPublicRead):
+    skill_level: int

@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import require_permission
+from app.auth import decode_token, require_permission, role_permissions
 from app.database import get_db
 from app.models.event import Event
 from app.models.match import Match
@@ -12,7 +12,7 @@ from app.models.player import EventPair, PairStatus, Player
 from app.models.registration import EventRegistration, RegistrationRole, RegistrationStatus
 from app.registration_guard import ensure_different_players, ensure_not_registered, primary_identity_key
 from app.models.user import User
-from app.schemas.players import PairCreate, PairRead, PairUpdate
+from app.schemas.players import PairCreate, PairPublicRead, PairRead, PairUpdate
 from app.services import recalculate_standings
 
 router = APIRouter(prefix="/events/{event_id}/pairs", tags=["pairs"])
@@ -52,9 +52,13 @@ def create_pair(
     return _get_pair(db, pair.id)
 
 
-@router.get("", response_model=list[PairRead])
-def list_pairs(event_id: int, db: Session = Depends(get_db)) -> list[EventPair]:
-    return list(
+@router.get("")
+def list_pairs(
+    event_id: int,
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+) -> list[dict]:
+    pairs = list(
         db.scalars(
             select(EventPair)
             .where(EventPair.event_id == event_id)
@@ -62,6 +66,8 @@ def list_pairs(event_id: int, db: Session = Depends(get_db)) -> list[EventPair]:
             .order_by(EventPair.seed.is_(None), EventPair.seed, EventPair.created_at)
         )
     )
+    schema = PairRead if _can_see_pair_skill(db, authorization) else PairPublicRead
+    return [schema.model_validate(pair).model_dump(mode="json") for pair in pairs]
 
 
 @router.patch("/{pair_id}", response_model=PairRead)
@@ -137,6 +143,19 @@ def _get_pair(db: Session, pair_id: int) -> EventPair:
     if not pair:
         raise HTTPException(status_code=404, detail="Pareja no encontrada")
     return pair
+
+
+def _can_see_pair_skill(db: Session, authorization: str | None) -> bool:
+    if not authorization or not authorization.startswith("Bearer "):
+        return False
+    try:
+        payload = decode_token(authorization.removeprefix("Bearer ").strip())
+    except HTTPException:
+        return False
+    user = db.get(User, payload.get("sub"))
+    if not user:
+        return False
+    return user.role.value == "superadmin" or role_permissions(db, user.role).get("events", False)
 
 
 def _status_with_capacity_guard(

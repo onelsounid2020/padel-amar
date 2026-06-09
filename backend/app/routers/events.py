@@ -8,8 +8,9 @@ from app.models.event import Event
 from app.models.match import Match
 from app.models.payment import PlayerPayment, PaymentStatus
 from app.models.player import EventPair, PairStatus
+from app.models.registration import EventRegistration
 from app.models.user import User
-from app.schemas.events import DashboardEvent, EventCreate, EventRead, EventUpdate
+from app.schemas.events import DashboardEvent, EventCreate, EventRead, EventRegistrationRead, EventRegistrationUpdate, EventUpdate
 from app.services import format_pair, sync_player_payments
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -75,6 +76,52 @@ def get_event(event_id: int, db: Session = Depends(get_db)) -> Event:
     if not event:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
     return event
+
+
+@router.get("/{event_id}/registrations", response_model=list[EventRegistrationRead])
+def list_event_registrations(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> list[EventRegistration]:
+    return list(
+        db.scalars(
+            select(EventRegistration)
+            .where(EventRegistration.event_id == event_id)
+            .options(
+                selectinload(EventRegistration.player),
+                selectinload(EventRegistration.pair).selectinload(EventPair.player_one),
+                selectinload(EventRegistration.pair).selectinload(EventPair.player_two),
+            )
+            .order_by(EventRegistration.created_at)
+        )
+    )
+
+
+@router.patch("/{event_id}/registrations/{registration_id}", response_model=EventRegistrationRead)
+def update_event_registration(
+    event_id: int,
+    registration_id: int,
+    payload: EventRegistrationUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_permission("events")),
+) -> EventRegistration:
+    registration = db.scalar(
+        select(EventRegistration)
+        .where(EventRegistration.id == registration_id, EventRegistration.event_id == event_id)
+        .options(
+            selectinload(EventRegistration.player),
+            selectinload(EventRegistration.pair).selectinload(EventPair.player_one),
+            selectinload(EventRegistration.pair).selectinload(EventPair.player_two),
+        )
+    )
+    if not registration:
+        raise HTTPException(status_code=404, detail="Inscripcion no encontrada")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(registration, key, value)
+    db.commit()
+    db.refresh(registration)
+    return registration
 
 
 @router.patch("/{event_id}", response_model=EventRead)

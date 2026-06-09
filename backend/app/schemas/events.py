@@ -4,7 +4,11 @@ from datetime import date as DateType, datetime
 
 from pydantic import BaseModel, Field
 
+from app.models.event import EventStatus
+from app.models.payment import PaymentStatus
+from app.models.registration import RegistrationRole, RegistrationStatus
 from app.schemas.common import ORMModel
+from app.schemas.players import PairPublicRead, PlayerRead
 
 
 class EventBase(BaseModel):
@@ -19,6 +23,7 @@ class EventBase(BaseModel):
     category_configs: list[dict] = Field(default_factory=list)
     ranking_config: dict = Field(default_factory=dict)
     description: str | None = None
+    status: EventStatus = EventStatus.registration_open
     is_active: bool = True
 
 
@@ -38,6 +43,7 @@ class EventUpdate(BaseModel):
     category_configs: list[dict] | None = None
     ranking_config: dict | None = None
     description: str | None = None
+    status: EventStatus | None = None
     is_active: bool | None = None
 
 
@@ -51,3 +57,26 @@ class DashboardEvent(EventRead):
     available_spots: int
     pending_payments: int
     completed_matches: int
+
+
+class EventRegistrationRead(ORMModel):
+    id: int
+    event_id: int
+    pair_id: int
+    player_id: int
+    user_id: int | None
+    role: RegistrationRole
+    category: str
+    status: RegistrationStatus
+    payment_status: PaymentStatus
+    checked_in: bool
+    source: str
+    created_at: datetime
+    updated_at: datetime
+    player: PlayerRead
+    pair: PairPublicRead
+
+
+class EventRegistrationUpdate(BaseModel):
+    checked_in: bool | None = None
+    status: RegistrationStatus | None = None

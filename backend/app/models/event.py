@@ -1,9 +1,19 @@
+import enum
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Integer, JSON, String, Text
+from sqlalchemy import Date, DateTime, Enum, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+class EventStatus(str, enum.Enum):
+    draft = "draft"
+    published = "published"
+    registration_open = "registration_open"
+    registration_closed = "registration_closed"
+    live = "live"
+    finished = "finished"
 
 
 class Event(Base):
@@ -21,6 +31,7 @@ class Event(Base):
     category_configs: Mapped[list[dict]] = mapped_column(JSON, default=list)
     ranking_config: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.registration_open, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

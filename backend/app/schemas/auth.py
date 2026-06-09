@@ -56,6 +56,11 @@ class UserRead(ORMModel):
     created_at: datetime
 
 
+class PasswordResetResponse(BaseModel):
+    user: UserRead
+    temporary_password: str
+
+
 class AuthResponse(BaseModel):
     access_token: str
     user: UserRead

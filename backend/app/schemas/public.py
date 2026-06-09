@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from app.models.player import PreferredSide
-from app.schemas.players import PairRead
+from app.schemas.players import PairPublicRead
 from app.schemas.common import ORMModel
 
 
@@ -22,7 +22,7 @@ class PublicRegistrationRequest(BaseModel):
 
 
 class PublicRegistrationResponse(BaseModel):
-    pair: PairRead
+    pair: PairPublicRead
 
 
 class PublicMemberRead(ORMModel):

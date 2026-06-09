@@ -152,6 +152,59 @@ def register_player(
     return PublicRegistrationResponse(pair=pair)
 
 
+@router.post("/events/{event_id}/pairs/{pair_id}/join", response_model=PublicRegistrationResponse)
+def join_pair(
+    event_id: int,
+    pair_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> PublicRegistrationResponse:
+    if user.role != UserRole.jugador:
+        raise HTTPException(status_code=403, detail="Debes entrar con una cuenta de jugador para unirte como partner")
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    pair = db.scalar(select(EventPair).where(EventPair.id == pair_id, EventPair.event_id == event_id))
+    if not pair:
+        raise HTTPException(status_code=404, detail="Pareja no encontrada")
+    if pair.status != PairStatus.buscando_partner or pair.player_two_id:
+        raise HTTPException(status_code=400, detail="Esta pareja ya no esta buscando partner")
+
+    partner = _player_for_registration(
+        db,
+        user_id=user.id,
+        name=user.name,
+        email=user.email,
+        phone=user.phone,
+        category=pair.category,
+        preferred_side=user.preferred_side,
+    )
+    player_one = db.get(Player, pair.player_one_id)
+    ensure_different_players(player_one, partner)
+    ensure_not_registered(db, event_id, partner)
+
+    pair.player_two_id = partner.id
+    pair.status = PairStatus.completa
+    _add_registration(
+        db,
+        event_id=event_id,
+        pair_id=pair.id,
+        player=partner,
+        role=RegistrationRole.partner,
+        category=pair.category,
+        status=RegistrationStatus.confirmada,
+        payment_status=PaymentStatus.pendiente,
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Ya estas inscrito en este evento") from exc
+    sync_player_payments(db, event_id)
+    pair = db.scalar(select(EventPair).where(EventPair.id == pair.id))
+    return PublicRegistrationResponse(pair=pair)
+
+
 def _player_for_registration(
     db: Session,
     *,

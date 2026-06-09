@@ -43,6 +43,7 @@ export const api = {
   users: () => request("/auth/users"),
   createUser: (data) => request("/auth/users", { method: "POST", body: JSON.stringify(data) }),
   updateUser: (userId, data) => request(`/auth/users/${userId}`, { method: "PATCH", body: JSON.stringify(data) }),
+  resetUserPassword: (userId) => request(`/auth/users/${userId}/reset-password`, { method: "POST" }),
   deleteUser: (userId) => request(`/auth/users/${userId}`, { method: "DELETE" }),
   myPermissions: () => request("/auth/permissions/me"),
   permissionModules: () => request("/auth/permissions/modules"),
@@ -54,6 +55,9 @@ export const api = {
   createEvent: (data) => request("/events", { method: "POST", body: JSON.stringify(data) }),
   updateEvent: (eventId, data) => request(`/events/${eventId}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteEvent: (eventId) => request(`/events/${eventId}`, { method: "DELETE" }),
+  eventRegistrations: (eventId) => request(`/events/${eventId}/registrations`),
+  updateEventRegistration: (eventId, registrationId, data) =>
+    request(`/events/${eventId}/registrations/${registrationId}`, { method: "PATCH", body: JSON.stringify(data) }),
   players: () => request("/players"),
   createPlayer: (data) => request("/players", { method: "POST", body: JSON.stringify(data) }),
   pairs: (eventId) => request(`/events/${eventId}/pairs`),
@@ -100,5 +104,6 @@ export const api = {
   whatsapp: (eventId) => request(`/events/${eventId}/whatsapp`),
   publicRegister: (eventId, data) =>
     request(`/public/events/${eventId}/registrations`, { method: "POST", body: JSON.stringify(data) }),
+  joinPair: (eventId, pairId) => request(`/public/events/${eventId}/pairs/${pairId}/join`, { method: "POST" }),
   publicMembers: () => request("/public/members"),
 };

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
   CalendarPlus,
+  Clock,
   Clipboard,
   CreditCard,
   ExternalLink,
@@ -14,6 +15,8 @@ import {
   RefreshCw,
   Save,
   Swords,
+  Target,
+  Trophy,
   UserPlus,
   Users,
   X,
@@ -35,6 +38,7 @@ const emptyEvent = {
   category_configs: [],
   ranking_config: {},
   description: "",
+  status: "registration_open",
   is_active: true,
 };
 
@@ -44,6 +48,17 @@ const defaultRankingConfig = {
   loss_points: 0,
   tiebreakers: ["points", "won", "difference", "points_for"],
 };
+
+const eventStatusOptions = [
+  { value: "draft", label: "Borrador" },
+  { value: "published", label: "Publicado" },
+  { value: "registration_open", label: "Inscripción abierta" },
+  { value: "registration_closed", label: "Inscripción cerrada" },
+  { value: "live", label: "En juego" },
+  { value: "finished", label: "Finalizado" },
+];
+
+const eventStatusLabels = Object.fromEntries(eventStatusOptions.map((option) => [option.value, option.label]));
 
 const rankingTiebreakerOptions = [
   { value: "points", label: "Puntos" },
@@ -162,6 +177,8 @@ function pageFromLocation() {
   if (path === "/tablet" || view === "tablet") return "tablet";
   if (path === "/usuarios" || view === "users") return "users";
   if (path === "/perfiles" || view === "profiles") return "profiles";
+  if (path === "/perfil" || view === "player") return "player";
+  if (path === "/partners" || view === "partners") return "partners";
   if (path === "/crear-cuenta" || view === "signup") return "signup";
   if (path === "/registro" || view === "register") return "register";
   if (path === "/resultados" || view === "results") return "results";
@@ -169,7 +186,7 @@ function pageFromLocation() {
 }
 
 function isEventActive(event) {
-  return event.is_active !== false;
+  return event.is_active !== false && !["draft", "finished"].includes(event.status);
 }
 
 function todayDateString() {
@@ -189,6 +206,7 @@ function App() {
   const [events, setEvents] = useState([]);
   const [players, setPlayers] = useState([]);
   const [pairs, setPairs] = useState([]);
+  const [registrations, setRegistrations] = useState([]);
   const [payments, setPayments] = useState([]);
   const [matches, setMatches] = useState([]);
   const [resultSubmissions, setResultSubmissions] = useState([]);
@@ -199,7 +217,7 @@ function App() {
   const [selectedEventId, setSelectedEventId] = useState("");
   const [eventForm, setEventForm] = useState(emptyEvent);
   const [playerForm, setPlayerForm] = useState(emptyPlayer);
-  const [pairForm, setPairForm] = useState({ player_one_id: "", player_two_id: "", category: "", status: "buscando_partner" });
+  const [pairForm, setPairForm] = useState({ player_one_id: "", player_two_id: "", category: "", skill_level: 5, status: "buscando_partner" });
   const [matchForm, setMatchForm] = useState({ pair_one_id: "", pair_two_id: "", round_name: "Grupo", court: "" });
   const [fixtureForm, setFixtureForm] = useState({
     mode: "groups",
@@ -248,6 +266,7 @@ function App() {
 
   function clearEventData() {
     setPairs([]);
+    setRegistrations([]);
     setPayments([]);
     setMatches([]);
     setResultSubmissions([]);
@@ -271,6 +290,8 @@ function App() {
       tablet: "/tablet",
       users: "/usuarios",
       profiles: "/perfiles",
+      player: "/perfil",
+      partners: "/partners",
       signup: "/crear-cuenta",
     };
     setPage(nextPage);
@@ -314,8 +335,9 @@ function App() {
       ? Object.fromEntries(fallbackPermissionModules.map((module) => [module.key, true]))
       : permissionOverride;
     const canLoadSubmissions = Boolean(effectiveUser);
-    const [pairData, paymentData, matchData, submissionData, standingData, rankingData, whatsappData] = await Promise.all([
+    const [pairData, registrationData, paymentData, matchData, submissionData, standingData, rankingData, whatsappData] = await Promise.all([
       api.pairs(requestedEventId),
+      effectiveUser && effectivePermissions.events ? api.eventRegistrations(requestedEventId) : Promise.resolve([]),
       effectiveUser && effectivePermissions.events ? api.payments(requestedEventId) : Promise.resolve([]),
       api.matches(requestedEventId),
       canLoadSubmissions ? api.resultSubmissions(requestedEventId) : Promise.resolve([]),
@@ -325,6 +347,7 @@ function App() {
     ]);
     if (selectedEventIdRef.current !== requestedEventId) return;
     setPairs(pairData);
+    setRegistrations(registrationData);
     setPayments(paymentData);
     setMatches(matchData);
     setResultSubmissions(submissionData);
@@ -443,6 +466,17 @@ function App() {
   }, [selectedEventId]);
 
   useEffect(() => {
+    if (page !== "events" || !selectedEventId || !authUser || !canAccess("events")) return undefined;
+    const interval = window.setInterval(() => {
+      Promise.all([
+        loadBase().catch((err) => setError(err.message)),
+        loadEventData(selectedEventId).catch((err) => setError(err.message)),
+      ]);
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [page, selectedEventId, authUser?.id, currentPermissions.events]);
+
+  useEffect(() => {
     if (page === "events") return;
     if (!selectedEventId && activeEvents[0]) {
       selectEventId(activeEvents[0].id);
@@ -507,8 +541,9 @@ function App() {
         ...pairForm,
         player_one_id: Number(pairForm.player_one_id),
         player_two_id: pairForm.player_two_id ? Number(pairForm.player_two_id) : null,
+        skill_level: Number(pairForm.skill_level || 5),
       });
-      setPairForm({ player_one_id: "", player_two_id: "", category: "", status: "buscando_partner" });
+      setPairForm({ player_one_id: "", player_two_id: "", category: "", skill_level: 5, status: "buscando_partner" });
     });
   }
 
@@ -640,6 +675,21 @@ function App() {
     });
   }
 
+  async function submitPlayerMatchResult(matchId, pairOneScore, pairTwoScore) {
+    await run(async () => {
+      await api.submitResult(selectedEventId, matchId, {
+        pair_one_score: Number(pairOneScore),
+        pair_two_score: Number(pairTwoScore),
+      });
+    });
+  }
+
+  async function joinPartnerPair(pairId) {
+    await run(async () => {
+      await api.joinPair(selectedEventId, pairId);
+    });
+  }
+
   async function deleteSelectedEvent() {
     if (!selectedEventId || !selectedEvent) return;
     confirmAction({
@@ -744,7 +794,7 @@ function App() {
       const permissionData = await loadPermissions(response.user);
       await loadBase(response.user, permissionData);
       await loadEventData(selectedEventId, response.user, permissionData);
-      if (response.user.role === "jugador") navigatePage("register");
+      if (response.user.role === "jugador") navigatePage("player");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -823,6 +873,14 @@ function App() {
     });
   }
 
+  async function resetUserPassword(userId) {
+    let resetResponse = null;
+    await run(async () => {
+      resetResponse = await api.resetUserPassword(userId);
+    });
+    return resetResponse;
+  }
+
   async function deleteUser(user) {
     confirmAction({
       tone: "danger",
@@ -847,6 +905,12 @@ function App() {
     });
   }
 
+  async function updateRegistration(registrationId, payload) {
+    await run(async () => {
+      await api.updateEventRegistration(selectedEventId, registrationId, payload);
+    });
+  }
+
   const pageContent = page === "register" ? (
     <PublicRegistration
       events={activeEvents}
@@ -864,6 +928,38 @@ function App() {
       onSubmit={submitPublicRegistration}
       loading={loading}
       pairs={pairs}
+      goSignup={() => navigatePage("signup")}
+      goLogin={() => navigatePage("events")}
+    />
+  ) : page === "player" ? (
+    <PlayerProfile
+      events={activeEvents}
+      pairs={pairs}
+      registrations={registrations}
+      matches={matches}
+      resultSubmissions={resultSubmissions}
+      standings={standings}
+      authUser={authUser}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={selectEventId}
+      selectedEvent={selectedEvent}
+      loading={loading}
+      onSubmitResult={submitPlayerMatchResult}
+      onRefresh={() => run(loadEventData)}
+      goRegister={() => navigatePage("register")}
+      goLogin={() => navigatePage("events")}
+    />
+  ) : page === "partners" ? (
+    <PartnerFinder
+      events={activeEvents}
+      pairs={pairs}
+      authUser={authUser}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={selectEventId}
+      selectedEvent={selectedEvent}
+      loading={loading}
+      onJoinPair={joinPartnerPair}
+      goRegister={() => navigatePage("register")}
       goSignup={() => navigatePage("signup")}
       goLogin={() => navigatePage("events")}
     />
@@ -919,6 +1015,7 @@ function App() {
         setForm={setUserForm}
         onSubmit={submitUser}
         onUpdateUser={updateUser}
+        onResetPassword={resetUserPassword}
         onDeleteUser={deleteUser}
       />
     ) : (
@@ -941,6 +1038,7 @@ function App() {
       players={players}
       pairs={pairs}
       payments={payments}
+      registrations={registrations}
       matches={matches}
       standings={standings}
       ranking={ranking}
@@ -973,6 +1071,7 @@ function App() {
       closeSelectedEvent={closeSelectedEvent}
       activateSelectedEvent={activateSelectedEvent}
       closePastEvents={closePastEvents}
+      updateRegistration={updateRegistration}
       confirmAction={confirmAction}
       authUser={authUser}
       run={run}
@@ -987,6 +1086,8 @@ function App() {
       </div>
       <div className="top-actions">
         <nav className="app-nav" aria-label="Secciones">
+          {authUser?.role === "jugador" && <button className={page === "player" ? "active" : ""} onClick={() => navigatePage("player")}>Mi perfil</button>}
+          {authUser?.role === "jugador" && <button className={page === "partners" ? "active" : ""} onClick={() => navigatePage("partners")}>Partners</button>}
           {canAccess("events") && <button className={page === "events" ? "active" : ""} onClick={() => navigatePage("events")}>Eventos</button>}
           {canAccess("register") && <button className={page === "register" ? "active" : ""} onClick={() => navigatePage("register")}>Registro</button>}
           {canAccess("results") && <button className={page === "results" ? "active" : ""} onClick={() => navigatePage("results")}>Resultados</button>}
@@ -1024,7 +1125,7 @@ function App() {
     );
   }
 
-  if (!authUser && ["events", "users", "profiles"].includes(page)) {
+  if (!authUser && ["events", "users", "profiles", "player", "partners"].includes(page)) {
     return (
       <main className="app-shell">
         {error && <div className="alert">{error}</div>}
@@ -1040,16 +1141,18 @@ function App() {
       {error && <div className="alert">{error}</div>}
       <ConfirmModal dialog={confirmDialog} setDialog={setConfirmDialog} loading={loading} />
 
-      <section className="metrics">
-        {dashboard.map((event) => (
-          <article className="metric-card" key={event.id}>
-            <strong>{event.name}</strong>
-            <span>{event.available_spots} cupos disponibles</span>
-            <span>{event.pending_payments} pagos pendientes</span>
-            <span>{event.completed_matches} resultados</span>
-          </article>
-        ))}
-      </section>
+      {canAccess("events") && page !== "player" && (
+        <section className="metrics">
+          {dashboard.map((event) => (
+            <article className="metric-card" key={event.id}>
+              <strong>{event.name}</strong>
+              <span>{event.available_spots} cupos disponibles</span>
+              <span>{event.pending_payments} pagos pendientes</span>
+              <span>{event.completed_matches} resultados</span>
+            </article>
+          ))}
+        </section>
+      )}
 
       {pageContent}
     </main>
@@ -1237,10 +1340,671 @@ function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goReg
   );
 }
 
+function parseFixtureRoundLabel(roundName) {
+  const parts = (roundName || "Grupo").split(" - ");
+  const lastPart = parts[parts.length - 1] || "";
+  const hasTime = /^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/.test(lastPart);
+  return {
+    category: parts[0] || "Sin categoria",
+    group: parts[1] || "",
+    time: hasTime ? lastPart : "",
+    turn: (hasTime ? parts.slice(1, -1) : parts.slice(1)).filter(Boolean).join(" - ") || roundName || "Grupo",
+  };
+}
+
+function matchHasResult(match) {
+  return match.pair_one_score !== null && match.pair_one_score !== undefined
+    && match.pair_two_score !== null && match.pair_two_score !== undefined;
+}
+
+function minutesFromMatch(match) {
+  const { time, turn } = parseFixtureRoundLabel(match.round_name);
+  const start = (time || turn || "").split("-")[0];
+  const [hours, minutes] = start.split(":").map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return 9999;
+  return (hours * 60) + minutes;
+}
+
 function pairHasUser(pair, userId) {
   return Boolean(pair && userId && (
     pair.player_one?.user_id === userId || pair.player_two?.user_id === userId
   ));
+}
+
+function buildPlayerNotices({ myPair, myRegistration, nextMatch, pairById, mySubmissions }) {
+  const notices = [];
+  if (!myPair) {
+    notices.push({
+      severity: "warning",
+      title: "Aún no estás inscrito",
+      message: "Inscríbete a un evento o busca una dupla que necesite partner.",
+    });
+    return notices;
+  }
+  if (myPair.status === "buscando_partner") {
+    notices.push({
+      severity: "warning",
+      title: "Tu dupla sigue incompleta",
+      message: "Puedes esperar a que alguien se una desde Partners o coordinar con la organización.",
+    });
+  } else {
+    notices.push({
+      severity: "success",
+      title: "Partner confirmado",
+      message: "Tu dupla está completa para este evento.",
+    });
+  }
+  if (myRegistration && !myRegistration.checked_in) {
+    notices.push({
+      severity: "warning",
+      title: "Check-in pendiente",
+      message: "Al llegar al club, avisa a la mesa para marcar tu presencia.",
+    });
+  }
+  if (nextMatch) {
+    const schedule = parseFixtureRoundLabel(nextMatch.round_name);
+    const pairOne = pairById.get(nextMatch.pair_one_id);
+    const pairTwo = pairById.get(nextMatch.pair_two_id);
+    const rival = nextMatch.pair_one_id === myPair.id ? pairTwo : pairOne;
+    notices.push({
+      severity: "info",
+      title: "Próximo partido",
+      message: `${schedule.time || schedule.turn}${nextMatch.court ? ` · Cancha ${nextMatch.court}` : ""} vs ${rival ? pairName(rival) : "pareja rival"}.`,
+    });
+  }
+  const conflict = mySubmissions.find((submission) => submission.status === "conflicto");
+  if (conflict) {
+    notices.push({
+      severity: "danger",
+      title: "Resultado en conflicto",
+      message: "Tu marcador no coincide con otro reporte. Revisa con la mesa.",
+    });
+  }
+  const confirmed = mySubmissions.find((submission) => submission.status === "confirmado");
+  if (confirmed) {
+    notices.push({
+      severity: "success",
+      title: "Resultado confirmado",
+      message: `Último marcador confirmado: ${confirmed.pair_one_score}-${confirmed.pair_two_score}.`,
+    });
+  }
+  return notices.slice(0, 5);
+}
+
+function NoticeCenter({ title, notices, emptyText }) {
+  return (
+    <section className="notice-center">
+      <div className="block-head">
+        <h2><AlertCircle size={18} /> {title}</h2>
+        <span>{notices.length} aviso{notices.length === 1 ? "" : "s"}</span>
+      </div>
+      {notices.length ? (
+        <div className="notice-list">
+          {notices.map((notice, index) => (
+            <article className={`notice-card ${notice.severity}`} key={`${notice.title}-${index}`}>
+              <strong>{notice.title}</strong>
+              <span>{notice.message}</span>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="notice-empty">{emptyText}</p>
+      )}
+    </section>
+  );
+}
+
+function PlayerProfile({
+  events,
+  pairs,
+  registrations = [],
+  matches,
+  resultSubmissions,
+  standings,
+  authUser,
+  selectedEventId,
+  setSelectedEventId,
+  selectedEvent,
+  loading,
+  onSubmitResult,
+  onRefresh,
+  goRegister,
+  goLogin,
+}) {
+  const [scores, setScores] = useState({});
+  const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
+  const myPair = authUser?.role === "jugador"
+    ? pairs.find((pair) => pairHasUser(pair, authUser.id))
+    : null;
+  const myMatches = myPair
+    ? matches
+      .filter((match) => match.pair_one_id === myPair.id || match.pair_two_id === myPair.id)
+      .sort((left, right) => minutesFromMatch(left) - minutesFromMatch(right) || left.id - right.id)
+    : [];
+  const completedMatches = myMatches.filter(matchHasResult);
+  const pendingMatches = myMatches.filter((match) => !matchHasResult(match));
+  const nextMatch = pendingMatches[0] || null;
+  const myStanding = myPair ? standings.find((standing) => standing.pair_id === myPair.id) : null;
+  const categoryStandings = myPair
+    ? standings.filter((standing) => standing.pair.category === myPair.category)
+    : [];
+  const mySubmissions = resultSubmissions.filter((submission) => (
+    myMatches.some((match) => match.id === submission.match_id)
+    && submission.submitted_by_user_id === authUser?.id
+  ));
+  const latestSubmissionByMatch = new Map(mySubmissions.map((submission) => [submission.match_id, submission]));
+  const matchScoreSeed = myMatches
+    .map((match) => `${match.id}:${match.pair_one_score ?? ""}-${match.pair_two_score ?? ""}`)
+    .join("|");
+  const submissionScoreSeed = mySubmissions
+    .map((submission) => `${submission.match_id}:${submission.pair_one_score}-${submission.pair_two_score}:${submission.status}`)
+    .join("|");
+  const progressPercent = myMatches.length ? Math.round((completedMatches.length / myMatches.length) * 100) : 0;
+  const myResults = myPair ? completedMatches.map((match) => playerMatchOutcome(match, myPair.id, pairById)) : [];
+  const myWins = myResults.filter((result) => result.result === "win").length;
+  const myLosses = myResults.filter((result) => result.result === "loss").length;
+  const bestWin = myResults
+    .filter((result) => result.result === "win")
+    .sort((left, right) => right.margin - left.margin)[0] || null;
+  const closestMatch = myResults
+    .sort((left, right) => left.absMargin - right.absMargin)[0] || null;
+  const partnerName = myPair
+    ? myPair.player_one?.user_id === authUser.id
+      ? myPair.player_two?.name || "Buscando partner"
+      : myPair.player_one?.name || "Partner"
+    : "";
+  const myRegistration = registrations?.find?.((registration) => registration.user_id === authUser.id) || null;
+  const playerNotices = buildPlayerNotices({
+    myPair,
+    myRegistration,
+    nextMatch,
+    pairById,
+    mySubmissions,
+  });
+
+  useEffect(() => {
+    setScores(Object.fromEntries(myMatches.map((match) => {
+      const submission = latestSubmissionByMatch.get(match.id);
+      return [
+        match.id,
+        {
+          pair_one_score: submission?.pair_one_score ?? match.pair_one_score ?? "",
+          pair_two_score: submission?.pair_two_score ?? match.pair_two_score ?? "",
+        },
+      ];
+    })));
+  }, [matchScoreSeed, submissionScoreSeed, selectedEventId]);
+
+  function setMatchScore(matchId, field, value) {
+    setScores((current) => ({
+      ...current,
+      [matchId]: {
+        pair_one_score: current[matchId]?.pair_one_score ?? "",
+        pair_two_score: current[matchId]?.pair_two_score ?? "",
+        [field]: value === "" ? "" : String(Math.max(0, Number(value || 0))),
+      },
+    }));
+  }
+
+  function submitMatch(matchId) {
+    const current = scores[matchId] || {};
+    if (current.pair_one_score === "" || current.pair_two_score === "") return;
+    onSubmitResult(matchId, current.pair_one_score, current.pair_two_score);
+  }
+
+  if (!authUser) {
+    return (
+      <section className="player-page">
+        <div className="player-hero">
+          <p className="eyebrow">Perfil jugador</p>
+          <h2>Entra para seguir tu evento</h2>
+          <p>Tu tablero personal muestra partidos, resultados reportados y ranking en vivo.</p>
+          <button type="button" onClick={goLogin}>Entrar a mi cuenta</button>
+        </div>
+      </section>
+    );
+  }
+
+  if (authUser.role !== "jugador") {
+    return <AccessDenied moduleName="Perfil jugador" />;
+  }
+
+  return (
+    <section className="player-page">
+      <div className="player-hero">
+        <div>
+          <p className="eyebrow">Perfil jugador</p>
+          <h2>{authUser.name}</h2>
+          <p>{authUser.category || "Sin categoría"} · {authUser.preferred_side || "lado indiferente"}{authUser.phone ? ` · ${authUser.phone}` : ""}</p>
+        </div>
+        <div className="player-event-picker">
+          <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
+            <option value="">Seleccionar evento</option>
+            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+          </select>
+          <button type="button" className="secondary-action" onClick={onRefresh} disabled={loading}>
+            <RefreshCw size={16} /> Actualizar
+          </button>
+        </div>
+      </div>
+
+      {selectedEvent && (
+        <div className="player-live-strip">
+          <div>
+            <span>Evento</span>
+            <strong>{selectedEvent.name}</strong>
+            <small>{selectedEvent.date} · {selectedEvent.place} · {selectedEvent.schedule}</small>
+          </div>
+          <div>
+            <span>Avance</span>
+            <strong>{completedMatches.length}/{myMatches.length || 0}</strong>
+            <small>{progressPercent}% de tus partidos jugados</small>
+          </div>
+          <div>
+            <span>Ranking</span>
+            <strong>{myStanding?.position ? `#${myStanding.position}` : "-"}</strong>
+            <small>{myStanding ? `${myStanding.points} pts · dif ${myStanding.points_for - myStanding.points_against}` : "Aparece al iniciar el evento"}</small>
+          </div>
+        </div>
+      )}
+
+      <NoticeCenter title="Mis avisos" notices={playerNotices} emptyText="Sin avisos por ahora. Todo se ve tranquilo." />
+
+      <PlayerIdentityCard
+        authUser={authUser}
+        selectedEvent={selectedEvent}
+        myPair={myPair}
+        partnerName={partnerName}
+        myStanding={myStanding}
+        wins={myWins}
+        losses={myLosses}
+      />
+
+      {!selectedEventId ? (
+        <div className="player-empty">
+          <strong>Selecciona un evento activo</strong>
+          <span>Cuando el evento tenga fixture, verás aquí tus turnos y marcadores.</span>
+        </div>
+      ) : !myPair ? (
+        <div className="player-empty">
+          <strong>No encontramos tu inscripción en este evento</strong>
+          <span>Inscríbete o confirma que tu cuenta esté vinculada al jugador correcto.</span>
+          <button type="button" onClick={goRegister}>Ir al registro</button>
+        </div>
+      ) : (
+        <>
+          <section className="player-grid">
+            <article className="player-focus-card">
+              <div className="player-card-head">
+                <h2><Target size={18} /> Tu pareja</h2>
+                <span>{myPair.category}</span>
+              </div>
+              <strong>{pairName(myPair)}</strong>
+              <div className="player-progress-bar" aria-label="Avance de partidos">
+                <span style={{ width: `${progressPercent}%` }} />
+              </div>
+              <div className="player-stat-row">
+                <span>{myStanding?.played || completedMatches.length} jugados</span>
+                <span>{myStanding?.won || 0} ganados</span>
+                <span>{myStanding?.lost || 0} perdidos</span>
+              </div>
+            </article>
+
+            <article className="player-focus-card next">
+              <div className="player-card-head">
+                <h2><Clock size={18} /> Próximo partido</h2>
+                <span>{nextMatch ? parseFixtureRoundLabel(nextMatch.round_name).time || parseFixtureRoundLabel(nextMatch.round_name).turn : "Sin pendientes"}</span>
+              </div>
+              {nextMatch ? (
+                <MatchSummary match={nextMatch} pairById={pairById} myPairId={myPair.id} />
+              ) : (
+                <p className="empty">No tienes partidos pendientes en este evento.</p>
+              )}
+            </article>
+
+            <article className="player-focus-card">
+              <div className="player-card-head">
+                <h2><Trophy size={18} /> Tu categoría</h2>
+                <span>{categoryStandings.length} parejas</span>
+              </div>
+              <div className="player-mini-ranking">
+                {categoryStandings.slice(0, 5).map((standing) => (
+                  <div className={standing.pair_id === myPair.id ? "me" : ""} key={standing.id}>
+                    <span>{standing.position}</span>
+                    <strong>{pairName(standing.pair)}</strong>
+                    <em>{standing.points} pts</em>
+                  </div>
+                ))}
+                {!categoryStandings.length && <p className="empty">Ranking pendiente.</p>}
+              </div>
+            </article>
+          </section>
+
+          <PlayerEventSummary
+            event={selectedEvent}
+            myPair={myPair}
+            myStanding={myStanding}
+            myMatches={myMatches}
+            myResults={myResults}
+            bestWin={bestWin}
+            closestMatch={closestMatch}
+            progressPercent={progressPercent}
+          />
+
+          <section className="player-match-list">
+            <div className="block-head">
+              <h2><FileCheck2 size={18} /> Mis partidos</h2>
+              <span>{pendingMatches.length} pendiente{pendingMatches.length === 1 ? "" : "s"}</span>
+            </div>
+            {myMatches.length ? myMatches.map((match) => (
+              <PlayerMatchCard
+                key={match.id}
+                match={match}
+                pairById={pairById}
+                myPairId={myPair.id}
+                submission={latestSubmissionByMatch.get(match.id)}
+                score={scores[match.id] || { pair_one_score: "", pair_two_score: "" }}
+                setScore={setMatchScore}
+                onSubmit={submitMatch}
+                loading={loading}
+              />
+            )) : (
+              <div className="player-empty compact">
+                <strong>Fixture pendiente</strong>
+                <span>Cuando la organización genere los partidos, aparecerán aquí.</span>
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </section>
+  );
+}
+
+function playerMatchOutcome(match, myPairId, pairById) {
+  const isPairOne = match.pair_one_id === myPairId;
+  const myScore = Number(isPairOne ? match.pair_one_score : match.pair_two_score);
+  const rivalScore = Number(isPairOne ? match.pair_two_score : match.pair_one_score);
+  const rivalPairId = isPairOne ? match.pair_two_id : match.pair_one_id;
+  const rival = pairById.get(rivalPairId);
+  const margin = myScore - rivalScore;
+  return {
+    absMargin: Math.abs(margin),
+    margin,
+    match,
+    myScore,
+    result: margin > 0 ? "win" : margin < 0 ? "loss" : "draw",
+    rivalName: rival ? pairName(rival) : `Pareja ${rivalPairId}`,
+    rivalScore,
+  };
+}
+
+function PlayerIdentityCard({ authUser, selectedEvent, myPair, partnerName, myStanding, wins, losses }) {
+  return (
+    <section className="player-identity-card">
+      <div className="player-avatar" aria-hidden="true">
+        {authUser.name?.slice(0, 1).toUpperCase() || "A"}
+      </div>
+      <div className="player-identity-main">
+        <span>Jugador AMAR</span>
+        <strong>{authUser.name}</strong>
+        <small>{authUser.email}</small>
+      </div>
+      <div className="player-identity-facts">
+        <div>
+          <span>Categoría</span>
+          <strong>{authUser.category || myPair?.category || "-"}</strong>
+        </div>
+        <div>
+          <span>Lado</span>
+          <strong>{authUser.preferred_side || "indiferente"}</strong>
+        </div>
+        <div>
+          <span>Partner</span>
+          <strong>{partnerName || "Sin evento"}</strong>
+        </div>
+        <div>
+          <span>Evento</span>
+          <strong>{selectedEvent ? eventStatusLabels[selectedEvent.status] || "Activo" : "-"}</strong>
+        </div>
+        <div>
+          <span>Registro</span>
+          <strong>{myPair ? myPair.status === "completa" ? "Completo" : "Buscando" : "Pendiente"}</strong>
+        </div>
+        <div>
+          <span>Balance</span>
+          <strong>{wins}-{losses}</strong>
+        </div>
+        <div>
+          <span>Posición</span>
+          <strong>{myStanding?.position ? `#${myStanding.position}` : "-"}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PlayerEventSummary({ event, myPair, myStanding, myMatches, myResults, bestWin, closestMatch, progressPercent }) {
+  if (!myPair) return null;
+  const played = myResults.length;
+  const pointsDiff = myStanding ? myStanding.points_for - myStanding.points_against : myResults.reduce((total, result) => total + result.margin, 0);
+
+  return (
+    <section className="player-event-summary">
+      <div className="block-head">
+        <div>
+          <h2><Medal size={18} /> Mi resumen del evento</h2>
+          <p className="muted">{event?.name || "Evento seleccionado"}</p>
+        </div>
+        <span>{progressPercent}% completado</span>
+      </div>
+      <div className="player-summary-grid">
+        <article>
+          <span>Posición</span>
+          <strong>{myStanding?.position ? `#${myStanding.position}` : "-"}</strong>
+          <small>{myStanding ? `${myStanding.points} pts` : "Ranking pendiente"}</small>
+        </article>
+        <article>
+          <span>Partidos</span>
+          <strong>{played}/{myMatches.length}</strong>
+          <small>{myStanding?.won ?? myResults.filter((result) => result.result === "win").length} victorias</small>
+        </article>
+        <article>
+          <span>Diferencia</span>
+          <strong>{pointsDiff > 0 ? `+${pointsDiff}` : pointsDiff}</strong>
+          <small>juegos a favor/en contra</small>
+        </article>
+      </div>
+      <div className="player-highlight-grid">
+        <div>
+          <span>Mejor victoria</span>
+          {bestWin ? (
+            <strong>{bestWin.myScore}-{bestWin.rivalScore} vs {bestWin.rivalName}</strong>
+          ) : (
+            <strong>Sin victorias cargadas</strong>
+          )}
+        </div>
+        <div>
+          <span>Partido más cerrado</span>
+          {closestMatch ? (
+            <strong>{closestMatch.myScore}-{closestMatch.rivalScore} vs {closestMatch.rivalName}</strong>
+          ) : (
+            <strong>Sin resultados cargados</strong>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MatchSummary({ match, pairById, myPairId }) {
+  const pairOne = pairById.get(match.pair_one_id);
+  const pairTwo = pairById.get(match.pair_two_id);
+  const schedule = parseFixtureRoundLabel(match.round_name);
+  const rival = match.pair_one_id === myPairId ? pairTwo : pairOne;
+  return (
+    <div className="player-match-summary">
+      <strong>vs {rival ? pairName(rival) : "Pareja rival"}</strong>
+      <span>{schedule.group || schedule.turn}{match.court ? ` · Cancha ${match.court}` : ""}</span>
+      {matchHasResult(match) && <em>{match.pair_one_score}-{match.pair_two_score}</em>}
+    </div>
+  );
+}
+
+function PlayerMatchCard({ match, pairById, myPairId, submission, score, setScore, onSubmit, loading }) {
+  const pairOne = pairById.get(match.pair_one_id);
+  const pairTwo = pairById.get(match.pair_two_id);
+  const schedule = parseFixtureRoundLabel(match.round_name);
+  const done = matchHasResult(match);
+  const canSubmit = score.pair_one_score !== "" && score.pair_two_score !== "";
+  const statusLabel = done
+    ? "Oficial"
+    : submission?.status === "conflicto"
+      ? "En conflicto"
+      : submission?.status === "confirmado"
+        ? "Confirmado"
+        : submission
+          ? "Reportado"
+          : "Pendiente";
+
+  return (
+    <article className={`player-match-card ${done ? "done" : ""} ${submission?.status || ""}`}>
+      <div className="player-match-meta">
+        <span>{schedule.time || schedule.turn}</span>
+        <strong>{match.court ? `Cancha ${match.court}` : "Cancha por confirmar"}</strong>
+        <em>{statusLabel}</em>
+      </div>
+      <div className="player-score-entry">
+        <label className={match.pair_one_id === myPairId ? "mine" : ""}>
+          <span>{pairOne ? pairName(pairOne) : "Pareja 1"}</span>
+          <input
+            type="number"
+            min="0"
+            value={score.pair_one_score}
+            onChange={(event) => setScore(match.id, "pair_one_score", event.target.value)}
+            disabled={done}
+          />
+        </label>
+        <strong>vs</strong>
+        <label className={match.pair_two_id === myPairId ? "mine" : ""}>
+          <span>{pairTwo ? pairName(pairTwo) : "Pareja 2"}</span>
+          <input
+            type="number"
+            min="0"
+            value={score.pair_two_score}
+            onChange={(event) => setScore(match.id, "pair_two_score", event.target.value)}
+            disabled={done}
+          />
+        </label>
+      </div>
+      {submission && !done && (
+        <div className={`player-submission-note ${submission.status}`}>
+          Tu reporte: {submission.pair_one_score}-{submission.pair_two_score}
+        </div>
+      )}
+      <button type="button" onClick={() => onSubmit(match.id)} disabled={done || !canSubmit || loading}>
+        <FileCheck2 size={16} /> {done ? "Resultado oficial" : submission ? "Actualizar reporte" : "Reportar resultado"}
+      </button>
+    </article>
+  );
+}
+
+function PartnerFinder({
+  events,
+  pairs,
+  authUser,
+  selectedEventId,
+  setSelectedEventId,
+  selectedEvent,
+  loading,
+  onJoinPair,
+  goRegister,
+  goSignup,
+  goLogin,
+}) {
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const searchingPairs = pairs.filter((pair) => pair.status === "buscando_partner" && !pair.player_two_id);
+  const myPair = authUser?.role === "jugador" ? pairs.find((pair) => pairHasUser(pair, authUser.id)) : null;
+  const categories = [...new Set(searchingPairs.map((pair) => pair.category).filter(Boolean))];
+  const visiblePairs = searchingPairs.filter((pair) => categoryFilter === "all" || pair.category === categoryFilter);
+  const needsAccount = authUser?.role !== "jugador";
+
+  return (
+    <section className="partners-page">
+      <div className="partners-hero">
+        <div>
+          <p className="eyebrow">Comunidad AMAR</p>
+          <h2>Busca partner para jugar</h2>
+          <p>Encuentra jugadores inscritos que necesitan completar dupla en el evento activo.</p>
+        </div>
+        <div className="player-event-picker">
+          <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
+            <option value="">Seleccionar evento</option>
+            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+          </select>
+          <button type="button" className="secondary-action" onClick={goRegister}>Inscribirme solo</button>
+        </div>
+      </div>
+
+      {needsAccount ? (
+        <div className="player-empty">
+          <strong>Necesitas una cuenta jugador</strong>
+          <span>Crea tu perfil o entra con tu cuenta para unirte como partner.</span>
+          <div className="modal-actions">
+            <button type="button" onClick={goSignup}>Crear perfil</button>
+            <button type="button" className="secondary-action" onClick={goLogin}>Entrar</button>
+          </div>
+        </div>
+      ) : !selectedEvent ? (
+        <div className="player-empty">
+          <strong>Selecciona un evento</strong>
+          <span>Verás las duplas que están buscando partner.</span>
+        </div>
+      ) : myPair ? (
+        <div className="partner-current-card">
+          <span>Ya tienes inscripción en este evento</span>
+          <strong>{pairName(myPair)}</strong>
+          <small>{myPair.category} · {myPair.status === "buscando_partner" ? "buscando partner" : "pareja completa"}</small>
+        </div>
+      ) : (
+        <>
+          <div className="partners-toolbar">
+            <div>
+              <strong>{visiblePairs.length}</strong>
+              <span>jugador{visiblePairs.length === 1 ? "" : "es"} buscando partner</span>
+            </div>
+            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="all">Todas las categorías</option>
+              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </div>
+
+          <div className="partner-card-grid">
+            {visiblePairs.length ? visiblePairs.map((pair) => (
+              <article className="partner-card" key={pair.id}>
+                <div className="partner-card-main">
+                  <span>{pair.category}</span>
+                  <strong>{pair.player_one.name}</strong>
+                  <small>{pair.player_one.preferred_side || "lado indiferente"}{pair.player_one.phone ? ` · ${pair.player_one.phone}` : ""}</small>
+                </div>
+                <div className="partner-card-actions">
+                  <button type="button" onClick={() => onJoinPair(pair.id)} disabled={loading}>
+                    <Users size={16} /> Unirme como partner
+                  </button>
+                </div>
+              </article>
+            )) : (
+              <div className="player-empty compact">
+                <strong>No hay jugadores buscando partner</strong>
+                <span>Puedes inscribirte solo para aparecer en esta lista.</span>
+                <button type="button" onClick={goRegister}>Inscribirme solo</button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function PublicResults({ events, pairs, matches, resultSubmissions, standings, authUser, selectedEventId, setSelectedEventId, selectedEvent, form, setForm, onSubmit }) {
@@ -1423,6 +2187,7 @@ function EventsPage(props) {
     players,
     pairs,
     payments,
+    registrations,
     matches,
     standings,
     ranking,
@@ -1455,6 +2220,7 @@ function EventsPage(props) {
     closeSelectedEvent,
     activateSelectedEvent,
     closePastEvents,
+    updateRegistration,
     confirmAction,
     authUser,
     run,
@@ -1499,6 +2265,7 @@ function EventsPage(props) {
       ranking_config: selectedEvent.ranking_config || {},
       description: selectedEvent.description || "",
       is_active: selectedEvent.is_active ?? true,
+      status: selectedEvent.status || "registration_open",
     });
     setRankingConfigForm({ ...defaultRankingConfig, ...(selectedEvent.ranking_config || {}) });
   }, [selectedEvent?.id]);
@@ -1539,6 +2306,7 @@ function EventsPage(props) {
             <div className="event-summary">
               <strong>{selectedEvent.name}</strong>
               <span>{selectedEvent.date} - {selectedEvent.place} - {selectedEvent.categories}</span>
+              <em>{eventStatusLabels[selectedEvent.status] || "Inscripción abierta"}</em>
               {!isEventActive(selectedEvent) && <em>Evento cerrado</em>}
             </div>
 
@@ -1592,6 +2360,17 @@ function EventsPage(props) {
 
             {eventTab === "organization" && (
             <>
+            <OperationsStatus
+              pairs={pairs}
+              payments={payments}
+              registrations={registrations}
+              matches={matches}
+            />
+            <CheckInBlock
+              registrations={registrations}
+              selectedEventId={selectedEventId}
+              onUpdateRegistration={updateRegistration}
+            />
             <div className="columns">
               <div>
                 <h3><UserPlus size={16} /> Jugadores</h3>
@@ -1620,6 +2399,14 @@ function EventsPage(props) {
                     {playerOptions.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
                   </select>
                   <CategorySelect value={pairForm.category} onChange={(value) => setPairForm({ ...pairForm, category: value })} />
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    placeholder="Nivel dupla"
+                    value={pairForm.skill_level}
+                    onChange={(e) => setPairForm({ ...pairForm, skill_level: e.target.value })}
+                  />
                   <select value={pairForm.status} onChange={(e) => setPairForm({ ...pairForm, status: e.target.value })}>
                     <option value="completa">Completa</option>
                     <option value="buscando_partner">Buscando partner</option>
@@ -1643,6 +2430,13 @@ function EventsPage(props) {
                 <div className="block-head">
                   <h3><Swords size={16} /> Partidos</h3>
                 </div>
+                <OperatorControlTower
+                  pairs={pairs}
+                  matches={matches}
+                  payments={payments}
+                  registrations={registrations}
+                  resultSubmissions={resultSubmissions}
+                />
                 <div className="fixture-workbench">
                   <div>
                     <details className="fixture-config" open={!matches.length}>
@@ -1777,13 +2571,21 @@ function EventsPage(props) {
             )}
 
             {eventTab === "ranking" && (
-              <div className="ranking-admin-grid">
-                <RankingConfigPanel
-                  config={rankingConfigForm}
-                  setConfig={setRankingConfigForm}
-                  onSave={submitRankingConfig}
+              <div className="ranking-section">
+                <div className="ranking-admin-grid">
+                  <RankingConfigPanel
+                    config={rankingConfigForm}
+                    setConfig={setRankingConfigForm}
+                    onSave={submitRankingConfig}
+                  />
+                  <RankingBlock ranking={ranking} standings={standings} />
+                </div>
+                <PostEventSummary
+                  event={selectedEvent}
+                  standings={standings}
+                  matches={matches}
+                  pairs={pairs}
                 />
-                <RankingBlock ranking={ranking} standings={standings} />
               </div>
             )}
 
@@ -1796,6 +2598,224 @@ function EventsPage(props) {
           </div>
         )}
       </section>
+    </section>
+  );
+}
+
+function OperationsStatus({ pairs, payments, registrations, matches }) {
+  const confirmedRegistrations = registrations.filter((registration) => registration.status !== "lista_espera" && registration.status !== "cancelada");
+  const checkedInCount = confirmedRegistrations.filter((registration) => registration.checked_in).length;
+  const incompletePairs = pairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id).length;
+  const pendingPayments = payments.filter((payment) => payment.status !== "pagado").length;
+  const pendingMatches = matches.filter((match) => !matchHasResult(match)).length;
+  const cards = [
+    {
+      label: "Check-in",
+      value: `${checkedInCount}/${confirmedRegistrations.length}`,
+      state: confirmedRegistrations.length && checkedInCount === confirmedRegistrations.length ? "ok" : "watch",
+    },
+    {
+      label: "Parejas incompletas",
+      value: incompletePairs,
+      state: incompletePairs ? "warning" : "ok",
+    },
+    {
+      label: "Pagos pendientes",
+      value: pendingPayments,
+      state: pendingPayments ? "watch" : "ok",
+    },
+    {
+      label: "Partidos pendientes",
+      value: pendingMatches,
+      state: pendingMatches ? "watch" : "ok",
+    },
+  ];
+
+  return (
+    <section className="operations-status">
+      {cards.map((card) => (
+        <article className={card.state} key={card.label}>
+          <span>{card.label}</span>
+          <strong>{card.value}</strong>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function CheckInBlock({ registrations, selectedEventId, onUpdateRegistration }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleRegistrations = normalizedQuery
+    ? registrations.filter((registration) => (
+      registration.player.name.toLowerCase().includes(normalizedQuery)
+      || pairName(registration.pair).toLowerCase().includes(normalizedQuery)
+      || registration.category.toLowerCase().includes(normalizedQuery)
+    ))
+    : registrations;
+
+  if (!selectedEventId) return null;
+
+  return (
+    <details className="checkin-block" open>
+      <summary>Check-in de jugadores</summary>
+      <div className="checkin-toolbar">
+        <input
+          type="search"
+          placeholder="Buscar jugador, pareja o categoría"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <span>{registrations.filter((registration) => registration.checked_in).length}/{registrations.length} presentes</span>
+      </div>
+      <div className="checkin-list">
+        {visibleRegistrations.length ? visibleRegistrations.map((registration) => (
+          <label className={`checkin-row ${registration.checked_in ? "checked" : ""}`} key={registration.id}>
+            <input
+              type="checkbox"
+              checked={registration.checked_in}
+              onChange={(event) => onUpdateRegistration(registration.id, { checked_in: event.target.checked })}
+            />
+            <span>
+              <strong>{registration.player.name}</strong>
+              <small>{pairName(registration.pair)} · {registration.category} · {registration.role}</small>
+            </span>
+            <em>{registration.status}</em>
+          </label>
+        )) : (
+          <p className="empty">No hay inscripciones para check-in.</p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function scheduledMatchRows(matches, pairs) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  return matches
+    .map((match) => {
+      const schedule = parseFixtureRound(match.round_name);
+      const pairOne = pairById.get(match.pair_one_id);
+      const pairTwo = pairById.get(match.pair_two_id);
+      const category = fixtureCategoryFromPairs(pairOne, pairTwo, schedule.category);
+      return {
+        category,
+        court: match.court || "",
+        courtLabel: normalizeCourt(match.court),
+        done: hasResult(match),
+        group: schedule.group,
+        match,
+        pairOne: pairOne ? pairName(pairOne) : `Pareja ${match.pair_one_id}`,
+        pairTwo: pairTwo ? pairName(pairTwo) : `Pareja ${match.pair_two_id}`,
+        time: schedule.time,
+        turn: schedule.turn,
+      };
+    })
+    .sort((a, b) => {
+      const timeCompare = minutesFromSlot(a.time || a.turn) - minutesFromSlot(b.time || b.turn);
+      if (timeCompare !== 0) return timeCompare;
+      return String(a.court || "zz").localeCompare(String(b.court || "zz"), undefined, { numeric: true });
+    });
+}
+
+function buildOperatorNotices({ pairs, matches, payments, registrations, resultSubmissions, nextSlot }) {
+  const notices = [];
+  const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
+  const missingCheckIn = registrations.filter((registration) => !registration.checked_in && registration.status !== "lista_espera" && registration.status !== "cancelada").length;
+  const pendingPayments = payments.filter((payment) => payment.status !== "pagado").length;
+  const incompletePairs = pairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id).length;
+  const pendingResults = matches.filter((match) => !matchHasResult(match)).length;
+  if (conflictCount) {
+    notices.push({ severity: "danger", title: "Resultados en conflicto", message: `${conflictCount} reporte${conflictCount === 1 ? "" : "s"} necesita revisión de mesa.` });
+  }
+  if (missingCheckIn) {
+    notices.push({ severity: "warning", title: "Check-in pendiente", message: `${missingCheckIn} jugador${missingCheckIn === 1 ? "" : "es"} aún no están marcados presentes.` });
+  }
+  if (incompletePairs) {
+    notices.push({ severity: "warning", title: "Parejas incompletas", message: `${incompletePairs} dupla${incompletePairs === 1 ? "" : "s"} siguen buscando partner.` });
+  }
+  if (pendingPayments) {
+    notices.push({ severity: "info", title: "Pagos pendientes", message: `${pendingPayments} pago${pendingPayments === 1 ? "" : "s"} por regularizar.` });
+  }
+  if (nextSlot) {
+    notices.push({ severity: "success", title: "Siguiente turno listo", message: `Próximo bloque: ${nextSlot}.` });
+  } else if (!pendingResults && matches.length) {
+    notices.push({ severity: "success", title: "Evento listo para cierre", message: "Todos los partidos tienen resultado cargado." });
+  }
+  return notices.slice(0, 5);
+}
+
+function OperatorControlTower({ pairs, matches, payments, registrations, resultSubmissions = [] }) {
+  const rows = scheduledMatchRows(matches, pairs);
+  const pendingRows = rows.filter((row) => !row.done);
+  const nextSlot = pendingRows[0]?.time || pendingRows[0]?.turn || "";
+  const nextRows = nextSlot ? rows.filter((row) => (row.time || row.turn) === nextSlot) : [];
+  const courtNames = [...new Set(rows.map((row) => row.court).filter(Boolean))]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  const completedCount = rows.filter((row) => row.done).length;
+  const checkedInCount = registrations.filter((registration) => registration.checked_in).length;
+  const pendingPayments = payments.filter((payment) => payment.status !== "pagado").length;
+  const collisionCount = rows.filter((row, index) => rows.some((other, otherIndex) => (
+    otherIndex !== index
+    && other.court === row.court
+    && (other.time || other.turn) === (row.time || row.turn)
+  ))).length;
+  const rowsByCourt = courtNames.reduce((groups, court) => {
+    groups[court] = rows.filter((row) => row.court === court).slice(0, 5);
+    return groups;
+  }, {});
+  const operatorNotices = buildOperatorNotices({ pairs, matches, payments, registrations, resultSubmissions, nextSlot });
+
+  return (
+    <section className="operator-tower">
+      <div className="operator-tower-head">
+        <div>
+          <p className="eyebrow">Operador Pro</p>
+          <h3>Torre de control</h3>
+        </div>
+        <div className="operator-live-kpis">
+          <span>{completedCount}/{rows.length} resultados</span>
+          <span>{checkedInCount}/{registrations.length} presentes</span>
+          <span>{pendingPayments} pagos pendientes</span>
+          <span className={collisionCount ? "danger" : ""}>{collisionCount ? `${collisionCount} choques` : "Sin choques"}</span>
+        </div>
+      </div>
+
+      <NoticeCenter title="Avisos de mesa" notices={operatorNotices} emptyText="Sin avisos operativos." />
+
+      <div className="operator-next-strip">
+        <div>
+          <span>Próximo turno</span>
+          <strong>{nextSlot || "Sin pendientes"}</strong>
+          <small>{nextRows.length} partido{nextRows.length === 1 ? "" : "s"} programado{nextRows.length === 1 ? "" : "s"}</small>
+        </div>
+        <div className="operator-next-list">
+          {nextRows.length ? nextRows.map((row) => (
+            <p key={`tower-next-${row.match.id}`}>
+              <b>{row.courtLabel}</b> {row.pairOne} vs {row.pairTwo}
+            </p>
+          )) : (
+            <p>La programación aparecerá cuando generes partidos.</p>
+          )}
+        </div>
+      </div>
+
+      {courtNames.length > 0 && (
+        <div className="operator-courts">
+          {courtNames.map((court) => (
+            <article key={`tower-court-${court}`}>
+              <strong>{normalizeCourt(court)}</strong>
+              {rowsByCourt[court].map((row) => (
+                <div className={row.done ? "done" : nextSlot && (row.time || row.turn) === nextSlot ? "next" : ""} key={`tower-${court}-${row.match.id}`}>
+                  <span>{row.time || row.turn}</span>
+                  <small>{row.category}</small>
+                  <p>{row.pairOne} vs {row.pairTwo}</p>
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -2007,6 +3027,13 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <input placeholder="Americano, grupos, ranking..." value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
           <small>Descripción interna del formato general.</small>
         </label>
+        <label className="form-field">
+          <span>Estado operativo</span>
+          <select value={form.status || "registration_open"} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            {eventStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <small>Controla si el evento está en borrador, abierto, en juego o finalizado.</small>
+        </label>
         <label className="event-active-toggle">
           <input
             type="checkbox"
@@ -2200,7 +3227,7 @@ function ProfilePermissionCard({ config, modules, roleLabel, description, onSave
   );
 }
 
-function UsersPage({ authUser, users, form, setForm, onSubmit, onUpdateUser, onDeleteUser }) {
+function UsersPage({ authUser, users, form, setForm, onSubmit, onUpdateUser, onResetPassword, onDeleteUser }) {
   const canManageUsers = Boolean(authUser);
 
   if (!canManageUsers) {
@@ -2229,14 +3256,16 @@ function UsersPage({ authUser, users, form, setForm, onSubmit, onUpdateUser, onD
         setForm={setForm}
         onSubmit={onSubmit}
         onUpdateUser={onUpdateUser}
+        onResetPassword={onResetPassword}
         onDeleteUser={onDeleteUser}
       />
     </section>
   );
 }
 
-function UsersBlock({ authUser, users, form, setForm, onSubmit, onUpdateUser, onDeleteUser }) {
+function UsersBlock({ authUser, users, form, setForm, onSubmit, onUpdateUser, onResetPassword, onDeleteUser }) {
   const [query, setQuery] = useState("");
+  const [resetResult, setResetResult] = useState(null);
   const roleLabels = {
     jugador: "Jugador",
     operador: "Operador resultados",
@@ -2255,6 +3284,36 @@ function UsersBlock({ authUser, users, form, setForm, onSubmit, onUpdateUser, on
 
   return (
     <div className="data-block users-block">
+      {resetResult && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setResetResult(null)}>
+          <div className="registration-modal password-reset-modal" role="dialog" aria-modal="true" aria-labelledby="password-reset-title" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setResetResult(null)} aria-label="Cerrar restauración">
+              <X size={18} />
+            </button>
+            <div className="modal-icon">
+              <UserPlus size={24} />
+            </div>
+            <div>
+              <p className="eyebrow">Clave temporal</p>
+              <h2 id="password-reset-title">Clave restaurada para {resetResult.user.name}</h2>
+              <p>Entrégala por un canal directo y pídele que la cambie desde su perfil cuando tengamos esa opción disponible.</p>
+              <div className="temporary-password-box">
+                <span>{resetResult.user.email}</span>
+                <strong>{resetResult.temporary_password}</strong>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(resetResult.temporary_password)}
+              >
+                Copiar clave
+              </button>
+              <button type="button" className="secondary-action" onClick={() => setResetResult(null)}>Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="block-head">
         <h3><Users size={16} /> Usuarios y permisos</h3>
         <span>{users.length} cuenta{users.length === 1 ? "" : "s"}</span>
@@ -2297,6 +3356,10 @@ function UsersBlock({ authUser, users, form, setForm, onSubmit, onUpdateUser, on
             authUser={authUser}
             roleLabels={roleLabels}
             onUpdateUser={onUpdateUser}
+            onResetPassword={async (targetUser) => {
+              const result = await onResetPassword(targetUser.id);
+              if (result) setResetResult(result);
+            }}
             onDeleteUser={onDeleteUser}
           />
         )) : (
@@ -2307,7 +3370,7 @@ function UsersBlock({ authUser, users, form, setForm, onSubmit, onUpdateUser, on
   );
 }
 
-function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }) {
+function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onResetPassword, onDeleteUser }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({
     name: user.name,
@@ -2344,6 +3407,12 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }
     if (draft.password.trim()) payload.password = draft.password;
     await onUpdateUser(user.id, payload);
     setEditing(false);
+  }
+
+  async function resetPassword() {
+    const confirmed = window.confirm(`Se generará una clave temporal para ${user.name}. La clave actual dejará de funcionar.`);
+    if (!confirmed) return;
+    await onResetPassword(user);
   }
 
   if (editing) {
@@ -2401,6 +3470,7 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onDeleteUser }
       <em>{roleLabels[user.role] || user.role}</em>
       <div className="user-row-actions">
         <button type="button" className="secondary-action" onClick={() => setEditing(true)}>Editar</button>
+        <button type="button" className="secondary-action" onClick={resetPassword}>Restaurar clave</button>
         <button type="button" className="danger-action" onClick={() => onDeleteUser(user)} disabled={isSelf}>Eliminar</button>
       </div>
     </div>
@@ -2424,6 +3494,10 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
   const activeSelectedPairs = selectedEventPairs.filter((pair) => pair.status !== "lista_espera");
   const availableSpots = selectedEvent ? Math.max((selectedEvent.capacity || 0) - activeSelectedPairs.length, 0) : 0;
   const needsPlayerAccount = authUser?.role !== "jugador";
+  const isWaitlist = Boolean(selectedEvent && availableSpots <= 0);
+  const canSubmitRegistration = Boolean(selectedEventId && form.name.trim() && form.email.trim() && (!hasPartner || form.partner_member_id));
+  const formPaymentCount = Number(Boolean(form.paid)) + Number(Boolean(hasPartner && form.partner_paid));
+  const registrationStep = needsPlayerAccount ? 1 : selectedEventId ? 3 : 2;
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -2444,6 +3518,26 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
       partner_phone: member?.phone || "",
       partner_preferred_side: member?.preferred_side || "indiferente",
     });
+  }
+
+  function selectEvent(eventId) {
+    setSelectedEventId(String(eventId));
+    setForm({ ...form, category: "" });
+    setSuccess(null);
+  }
+
+  function choosePartnerMode(mode) {
+    setPartnerMode(mode);
+    if (mode === "searching") {
+      setForm({
+        ...form,
+        partner_member_id: "",
+        partner_name: "",
+        partner_email: "",
+        partner_phone: "",
+        partner_paid: false,
+      });
+    }
   }
 
   return (
@@ -2467,272 +3561,230 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
           </div>
         </div>
       )}
-      <div className="registration-shell">
-        <section className="registration-stage">
-          <div className="registration-title">
+      <div className="registration-wizard">
+        <section className="registration-hero-card">
+          <div>
             <p className="eyebrow">Inscripciones AMAR</p>
-            <h2>Registro de jugadores</h2>
-            <p>Cuenta obligatoria, partner registrado y evento activo en un solo flujo.</p>
+            <h2>Elige tu evento y deja tu dupla lista</h2>
+            <p>Un flujo pensado para jugadores: selecciona fecha, define tu categoría, elige si vienes con partner y confirma.</p>
           </div>
-          <div className="profile-callout">
-            {authUser?.role === "jugador" ? (
-              <>
-                <span>Cuenta jugador</span>
-                <strong>{authUser.name}</strong>
-                <small>{authUser.email}</small>
-              </>
-            ) : (
-              <>
-                <strong>Cuenta jugador requerida</strong>
-                <span>Crea o usa tu cuenta para inscribirte a eventos.</span>
-                <button type="button" className="secondary-action" onClick={goSignup}>
-                  Crear perfil jugador
-                </button>
-              </>
-            )}
-          </div>
-
-          <div className="registration-steps" aria-label="Pasos de inscripción">
-            <span className={selectedEventId ? "done" : "active"}>1. Evento</span>
-            <span className={!needsPlayerAccount ? "done" : selectedEventId ? "active" : ""}>2. Cuenta</span>
-            <span className={!needsPlayerAccount && selectedEventId ? "active" : ""}>3. Inscribir</span>
-          </div>
-
-          <div className="registration-event-cards">
-            {events.map((event) => {
-              const isSelected = String(event.id) === String(selectedEventId);
-              const eventPairs = pairs.filter((pair) => String(pair.event_id) === String(event.id) && pair.status !== "lista_espera");
-              const eventSpots = Math.max((event.capacity || 0) - eventPairs.length, 0);
-              return (
-                <button
-                  type="button"
-                  className={`registration-event-card ${isSelected ? "active" : ""}`}
-                  key={event.id}
-                  onClick={() => {
-                    setSelectedEventId(String(event.id));
-                    setForm({ ...form, category: "" });
-                  }}
-                >
-                  <strong>{event.name}</strong>
-                  <span>{event.date} · {event.schedule}</span>
-                  <span>{event.place}</span>
-                  <em>{event.categories} · {eventSpots} cupos</em>
-                </button>
-              );
-            })}
-          </div>
-          <div className="member-count-card">
-            <span>Miembros jugadores</span>
-            <strong>{members.length}</strong>
-            <small>Disponibles para elegir como partner registrado.</small>
+          <div className="registration-progress" aria-label="Pasos de inscripción">
+            <span className={registrationStep >= 1 ? "active" : ""}><UserPlus size={16} /> Cuenta</span>
+            <span className={registrationStep >= 2 ? "active" : ""}><CalendarPlus size={16} /> Evento</span>
+            <span className={registrationStep >= 3 ? "active" : ""}><Check size={16} /> Confirmar</span>
           </div>
         </section>
 
-        <section className="panel registration-panel">
-          {needsPlayerAccount ? (
-            <div className="account-required">
-              <div className="modal-icon">
-                <UserPlus size={24} />
-              </div>
-              <div>
-                <p className="eyebrow">Registro con cuenta</p>
-                <h2>Primero crea tu perfil jugador</h2>
-                <p>Para inscribirte necesitamos que cada jugador tenga cuenta. Así evitamos duplicados y los datos quedan guardados para próximos eventos.</p>
-              </div>
-              <div className="modal-actions">
-                <button type="button" onClick={goSignup}>Crear perfil jugador</button>
-                <button type="button" className="secondary-action" onClick={goLogin}>Ya tengo cuenta</button>
-              </div>
-            </div>
-          ) : (
-          <>
-          {success && (
-            <div className={`registration-success ${success.waitlisted ? "waitlisted" : ""}`}>
-              <strong>{success.waitlisted ? "Quedaste en lista de espera" : "Inscripción registrada"}</strong>
-              <span>
-                {success.playerName}
-                {success.partnerName ? ` y ${success.partnerName}` : ""} {success.waitlisted ? "quedaron en lista de espera para" : "quedaron inscritos en"} {success.eventName}.
-              </span>
-              <button type="button" className="secondary-action" onClick={() => setSuccess(null)}>Inscribir otra persona</button>
-            </div>
-          )}
-          <div className="block-head">
-            <h2><UserPlus size={18} /> Datos de inscripción</h2>
-            <span className={`registration-status ${hasPartner ? "complete" : "searching"}`}>
-              {hasPartner ? "Pareja completa" : "Buscando partner"}
-            </span>
-          </div>
-          <div className="player-account-strip">
-            <div>
-              <span>Jugador</span>
-              <strong>{authUser?.name || form.name}</strong>
-              <small>{authUser?.email || form.email}</small>
+        {needsPlayerAccount ? (
+          <section className="registration-account-gate">
+            <div className="modal-icon">
+              <UserPlus size={24} />
             </div>
             <div>
-              <span>Evento</span>
-              <strong>{selectedEvent?.name || "Selecciona evento"}</strong>
-              <small>{availableSpots} cupos disponibles</small>
+              <p className="eyebrow">Cuenta jugador requerida</p>
+              <h2>Antes de inscribirte necesitamos reconocer tu perfil</h2>
+              <p>Así evitamos duplicados, guardamos tu progreso del evento y hacemos que tus resultados aparezcan en tu perfil.</p>
             </div>
-          </div>
-          <form onSubmit={onSubmit} className="registration-form">
-            <div className="form-section-title">Cuenta jugador</div>
-            <label className="form-field">
-              <span>Nombre jugador</span>
-              <input placeholder="Nombre y apellido" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required disabled />
-            </label>
-            <label className="form-field">
-              <span>Email</span>
-              <input
-                type="email"
-                placeholder="correo@dominio.com"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                required
-                disabled
-              />
-            </label>
-            <label className="form-field">
-              <span>Teléfono</span>
-              <input placeholder="Opcional" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </label>
-            <label className="form-field">
-              <span>Categoría</span>
-              <select value={selectedCategory} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                {options.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Lado preferido</span>
-              <select value={form.preferred_side} onChange={(e) => setForm({ ...form, preferred_side: e.target.value })}>
-                <option value="drive">Drive</option>
-                <option value="reves">Revés</option>
-                <option value="indiferente">Indiferente</option>
-              </select>
-            </label>
-
-            <div className="form-section-title">Partner</div>
-            <div className="registration-choice">
-              <button
-                type="button"
-                className={!hasPartner ? "active" : ""}
-                onClick={() => {
-                  setPartnerMode("searching");
-                  setForm({ ...form, partner_member_id: "", partner_name: "", partner_email: "", partner_phone: "", partner_paid: false });
-                }}
-              >
-                Busco partner
-              </button>
-              <button type="button" className={hasPartner ? "active" : ""} onClick={() => setPartnerMode("complete")}>
-                Vengo con partner
-              </button>
-            </div>
-
-            {hasPartner && (
-              <>
-                <div className="account-hint">
-                  <strong>El partner también debe tener cuenta jugador.</strong>
-                  <span>Si no aparece en la lista, pídele que cree su perfil y luego vuelve a seleccionarlo.</span>
-                </div>
-
-                <label className="form-field wide-field">
-                  <span>Seleccionar partner</span>
-                  <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)} required={hasPartner}>
-                    <option value="">Buscar en miembros registrados</option>
-                    {availableMembers.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.name}{member.category ? ` · ${member.category}` : ""}{member.preferred_side ? ` · ${member.preferred_side}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <small>Solo aparecen cuentas con rol jugador.</small>
-                </label>
-                {selectedPartnerMember && (
-                  <div className="member-preview">
-                    <strong>{selectedPartnerMember.name}</strong>
-                    <span>{selectedPartnerMember.category || "Sin categoría"} · {selectedPartnerMember.preferred_side || "lado indiferente"}</span>
-                    {selectedPartnerMember.phone && <small>{selectedPartnerMember.phone}</small>}
-                  </div>
-                )}
-              </>
-            )}
-            <div className="form-section-title">Pago</div>
-            <label className="payment-toggle">
-              <input
-                type="checkbox"
-                checked={form.paid}
-                onChange={(e) => setForm({ ...form, paid: e.target.checked })}
-              />
-              <span>
-                <strong>Jugador pagó inscripción</strong>
-                <small>Se marcará como pagado en pagos del evento.</small>
-              </span>
-            </label>
-            {hasPartner && (
-              <label className="payment-toggle">
-                <input
-                  type="checkbox"
-                  checked={form.partner_paid}
-                  onChange={(e) => setForm({ ...form, partner_paid: e.target.checked })}
-                />
-                <span>
-                  <strong>Partner pagó inscripción</strong>
-                  <small>Se marcará como pagado junto con la pareja.</small>
-                </span>
-              </label>
-            )}
-            <button disabled={loading || !selectedEventId || !form.name.trim() || !form.email.trim() || (hasPartner && !form.partner_member_id)}>
-              <UserPlus size={16} /> {loading ? "Registrando..." : "Confirmar inscripción"}
-            </button>
-          </form>
-          </>
-          )}
-        </section>
-
-        <aside className="registration-summary">
-          <div className="summary-header">
-            <span>Estado de inscripción</span>
-            <strong>{selectedEvent?.name || "Sin evento"}</strong>
-          </div>
-          <div className="summary-stats">
-            <div>
-              <strong>{availableSpots}</strong>
-              <span>Cupos</span>
-            </div>
-            <div>
-              <strong>{selectedEventPairs.length}</strong>
-              <span>Parejas</span>
-            </div>
-          </div>
-          <div>
-            <span>Evento</span>
-            <strong>{selectedEvent?.name || "Selecciona un evento"}</strong>
-            {selectedEvent && <small>{selectedEvent.date} · {selectedEvent.schedule}</small>}
-          </div>
-          <div>
-            <span>Jugador</span>
-            <strong>{form.name || "Pendiente"}</strong>
-            <small>{selectedCategory || "Sin categoría"} · {form.paid ? "Pagado" : "Pago pendiente"}</small>
-          </div>
-          <div>
-            <span>Partner</span>
-            <strong>{hasPartner ? (form.partner_name || "Pendiente") : "Buscando partner"}</strong>
-            <small>{hasPartner ? (selectedPartnerMember ? "Cuenta jugador seleccionada" : "Selecciona una cuenta jugador") : "Te anotamos individualmente"}</small>
-          </div>
-          <section className="registered-list">
-            <div className="block-head">
-              <h2><ListChecks size={18} /> Inscritos</h2>
-              <span>{selectedEventPairs.length} parejas</span>
-            </div>
-            <div className="registered-list-items">
-              {selectedEventPairs.length ? selectedEventPairs.map((pair) => (
-                <div key={pair.id} className="registered-list-item">
-                  <strong>{pairName(pair)}</strong>
-                  <small>{pair.category} · {pair.status === "lista_espera" ? "Lista de espera" : pair.status === "buscando_partner" ? "Buscando partner" : "Pareja completa"}</small>
-                </div>
-              )) : <p className="muted">Sin inscritos todavia</p>}
+            <div className="modal-actions">
+              <button type="button" onClick={goSignup}>Crear perfil jugador</button>
+              <button type="button" className="secondary-action" onClick={goLogin}>Ya tengo cuenta</button>
             </div>
           </section>
-        </aside>
+        ) : (
+          <form onSubmit={onSubmit} className="registration-wizard-grid">
+            <main className="registration-flow">
+              {success && (
+                <div className={`registration-success ${success.waitlisted ? "waitlisted" : ""}`}>
+                  <strong>{success.waitlisted ? "Quedaste en lista de espera" : "Inscripción registrada"}</strong>
+                  <span>
+                    {success.playerName}
+                    {success.partnerName ? ` y ${success.partnerName}` : ""} {success.waitlisted ? "quedaron en lista de espera para" : "quedaron inscritos en"} {success.eventName}.
+                  </span>
+                  <button type="button" className="secondary-action" onClick={() => setSuccess(null)}>Hacer otra inscripción</button>
+                </div>
+              )}
+
+              <section className="registration-step-card">
+                <div className="step-card-head">
+                  <span>1</span>
+                  <div>
+                    <h3>Escoge el evento</h3>
+                    <p>La disponibilidad se calcula con las parejas inscritas activas.</p>
+                  </div>
+                </div>
+                <div className="registration-event-grid">
+                  {events.map((event) => {
+                    const isSelected = String(event.id) === String(selectedEventId);
+                    const eventPairs = pairs.filter((pair) => String(pair.event_id) === String(event.id) && pair.status !== "lista_espera");
+                    const eventSpots = Math.max((event.capacity || 0) - eventPairs.length, 0);
+                    return (
+                      <button
+                        type="button"
+                        className={`event-choice-card ${isSelected ? "active" : ""}`}
+                        key={event.id}
+                        onClick={() => selectEvent(event.id)}
+                      >
+                        <span className={eventSpots > 0 ? "spot-pill" : "spot-pill waitlist"}>{eventSpots > 0 ? `${eventSpots} cupos` : "Lista de espera"}</span>
+                        <strong>{event.name}</strong>
+                        <small>{event.date} · {event.schedule}</small>
+                        <em>{event.place}</em>
+                        <b>{event.categories}</b>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className={`registration-step-card ${!selectedEventId ? "disabled" : ""}`}>
+                <div className="step-card-head">
+                  <span>2</span>
+                  <div>
+                    <h3>Define cómo jugarás</h3>
+                    <p>Aquí solo eliges categoría y partner; la organización completa los ajustes internos después.</p>
+                  </div>
+                </div>
+                <div className="registration-detail-grid">
+                  <label className="form-field">
+                    <span>Categoría del evento</span>
+                    <select value={selectedCategory} onChange={(e) => setForm({ ...form, category: e.target.value })} disabled={!selectedEventId}>
+                      {options.map((category) => <option key={category} value={category}>{category}</option>)}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    <span>Lado preferido</span>
+                    <select value={form.preferred_side} onChange={(e) => setForm({ ...form, preferred_side: e.target.value })}>
+                      <option value="drive">Drive</option>
+                      <option value="reves">Revés</option>
+                      <option value="indiferente">Indiferente</option>
+                    </select>
+                  </label>
+                  <label className="form-field wide-field">
+                    <span>Teléfono</span>
+                    <input placeholder="Opcional" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                  </label>
+                </div>
+
+                <div className="partner-mode-cards">
+                  <button type="button" className={!hasPartner ? "active" : ""} onClick={() => choosePartnerMode("searching")}>
+                    <Users size={18} />
+                    <strong>Busco partner</strong>
+                    <small>Te anotamos y la organización podrá completarte.</small>
+                  </button>
+                  <button type="button" className={hasPartner ? "active" : ""} onClick={() => choosePartnerMode("complete")}>
+                    <Check size={18} />
+                    <strong>Vengo con partner</strong>
+                    <small>Selecciona una cuenta jugador registrada.</small>
+                  </button>
+                </div>
+
+                {hasPartner && (
+                  <div className="partner-picker-card">
+                    <label className="form-field wide-field">
+                      <span>Partner</span>
+                      <select value={form.partner_member_id} onChange={(e) => applyPartnerMember(e.target.value)} required={hasPartner}>
+                        <option value="">Buscar en miembros registrados</option>
+                        {availableMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}{member.category ? ` · ${member.category}` : ""}{member.preferred_side ? ` · ${member.preferred_side}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <small>Si no aparece, primero debe crear su perfil jugador.</small>
+                    </label>
+                    {selectedPartnerMember && (
+                      <div className="member-preview">
+                        <strong>{selectedPartnerMember.name}</strong>
+                        <span>{selectedPartnerMember.category || "Sin categoría"} · {selectedPartnerMember.preferred_side || "lado indiferente"}</span>
+                        {selectedPartnerMember.phone && <small>{selectedPartnerMember.phone}</small>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              <section className={`registration-step-card ${!selectedEventId ? "disabled" : ""}`}>
+                <div className="step-card-head">
+                  <span>3</span>
+                  <div>
+                    <h3>Confirma tu inscripción</h3>
+                    <p>Marca pagos si ya fueron recibidos y deja la pareja lista para el evento.</p>
+                  </div>
+                </div>
+                <div className="payment-row-grid">
+                  <label className="payment-toggle">
+                    <input
+                      type="checkbox"
+                      checked={form.paid}
+                      onChange={(e) => setForm({ ...form, paid: e.target.checked })}
+                    />
+                    <span>
+                      <strong>Jugador pagó</strong>
+                      <small>{authUser?.name || form.name}</small>
+                    </span>
+                  </label>
+                  {hasPartner && (
+                    <label className="payment-toggle">
+                      <input
+                        type="checkbox"
+                        checked={form.partner_paid}
+                        onChange={(e) => setForm({ ...form, partner_paid: e.target.checked })}
+                      />
+                      <span>
+                        <strong>Partner pagó</strong>
+                        <small>{form.partner_name || "Selecciona partner"}</small>
+                      </span>
+                    </label>
+                  )}
+                </div>
+                <button className="registration-submit" disabled={loading || !canSubmitRegistration}>
+                  <UserPlus size={16} /> {loading ? "Registrando..." : isWaitlist ? "Entrar a lista de espera" : "Confirmar inscripción"}
+                </button>
+              </section>
+            </main>
+
+            <aside className="registration-live-summary">
+              <div className="summary-player-card">
+                <span>Jugador</span>
+                <strong>{authUser?.name || form.name}</strong>
+                <small>{authUser?.email || form.email}</small>
+              </div>
+              <div className={`summary-event-card ${isWaitlist ? "waitlist" : ""}`}>
+                <span>{isWaitlist ? "Lista de espera" : "Cupos disponibles"}</span>
+                <strong>{selectedEvent ? availableSpots : "-"}</strong>
+                <small>{selectedEvent?.name || "Selecciona un evento"}</small>
+              </div>
+              <div className="summary-line-card">
+                <span>Categoría</span>
+                <strong>{selectedCategory || "Pendiente"}</strong>
+                <small>{form.preferred_side || "indiferente"}</small>
+              </div>
+              <div className="summary-line-card">
+                <span>Partner</span>
+                <strong>{hasPartner ? (form.partner_name || "Pendiente") : "Buscando partner"}</strong>
+                <small>{hasPartner ? "Pareja completa" : "Inscripción individual"}</small>
+              </div>
+              <div className="summary-line-card">
+                <span>Pagos marcados</span>
+                <strong>{formPaymentCount}/{hasPartner ? 2 : 1}</strong>
+                <small>Editable por la organización después.</small>
+              </div>
+              <section className="registered-list compact">
+                <div className="block-head">
+                  <h2><ListChecks size={18} /> Inscritos</h2>
+                  <span>{selectedEventPairs.length} parejas</span>
+                </div>
+                <div className="registered-list-items">
+                  {selectedEventPairs.length ? selectedEventPairs.map((pair) => (
+                    <div key={pair.id} className="registered-list-item">
+                      <strong>{pairName(pair)}</strong>
+                      <small>{pair.category} · {pair.status === "lista_espera" ? "Lista de espera" : pair.status === "buscando_partner" ? "Buscando partner" : "Pareja completa"}</small>
+                    </div>
+                  )) : <p className="muted">Sin inscritos todavia</p>}
+                </div>
+              </section>
+            </aside>
+          </form>
+        )}
       </div>
     </section>
   );
@@ -2753,6 +3805,33 @@ function CategorySelect({ value, onChange }) {
         {categoryOptions.mujer.map((category) => <option key={`f-${category}`} value={category}>{category}</option>)}
       </optgroup>
     </select>
+  );
+}
+
+function pairLevelStyle(level) {
+  const normalized = Math.min(10, Math.max(1, Number(level || 5)));
+  const palette = {
+    1: ["#e9f4fb", "#0e5d8f"],
+    2: ["#d8eff8", "#075f86"],
+    3: ["#d9f5ea", "#0a6f54"],
+    4: ["#e8f8d8", "#4d7c0f"],
+    5: ["#fff6c7", "#8a6500"],
+    6: ["#ffe8bd", "#9a5400"],
+    7: ["#ffd9c8", "#a43a16"],
+    8: ["#ffd5dd", "#a01743"],
+    9: ["#eadcff", "#6231a6"],
+    10: ["#d9ddff", "#263a9a"],
+  };
+  const [background, color] = palette[normalized];
+  return { "--level-bg": background, "--level-color": color };
+}
+
+function PairLevelBadge({ level, compact = false }) {
+  const normalized = Math.min(10, Math.max(1, Number(level || 5)));
+  return (
+    <span className={`pair-level-badge ${compact ? "compact" : ""}`} style={pairLevelStyle(normalized)}>
+      N{normalized}
+    </span>
   );
 }
 
@@ -2820,6 +3899,15 @@ function PairsBlock({ pairs, players, eventId, onChange, confirmAction }) {
                       value={pair.category}
                       onChange={(category) => onChange(() => api.updatePair(eventId, pair.id, { category }))}
                     />
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={pair.skill_level || 5}
+                      title="Nivel dupla"
+                      onChange={(event) => onChange(() => api.updatePair(eventId, pair.id, { skill_level: Number(event.target.value || 5) }))}
+                    />
+                    <PairLevelBadge level={pair.skill_level} compact />
                     <select
                       value={pair.status}
                       onChange={(event) => onChange(() => api.updatePair(eventId, pair.id, { status: event.target.value }))}
@@ -2943,6 +4031,113 @@ function RankingBlock({ ranking, standings }) {
   );
 }
 
+function PostEventSummary({ event, standings, matches, pairs }) {
+  const [copied, setCopied] = useState(false);
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const completedMatches = matches.filter(matchHasResult);
+  const standingsByCategory = standings.reduce((groups, standing) => {
+    const category = standing.pair.category || "Sin categoria";
+    groups[category] = [...(groups[category] || []), standing].sort((left, right) => (left.position || 999) - (right.position || 999));
+    return groups;
+  }, {});
+  const closeMatches = completedMatches
+    .map((match) => {
+      const pairOne = pairById.get(match.pair_one_id);
+      const pairTwo = pairById.get(match.pair_two_id);
+      return {
+        match,
+        diff: Math.abs(Number(match.pair_one_score || 0) - Number(match.pair_two_score || 0)),
+        label: `${pairOne ? pairName(pairOne) : `Pareja ${match.pair_one_id}`} ${match.pair_one_score}-${match.pair_two_score} ${pairTwo ? pairName(pairTwo) : `Pareja ${match.pair_two_id}`}`,
+      };
+    })
+    .sort((left, right) => left.diff - right.diff)
+    .slice(0, 5);
+  const totalPairs = pairs.filter((pair) => pair.status !== "lista_espera").length;
+  const shareText = [
+    `*${event?.name || "Evento AMAR"}*`,
+    event?.date ? `Fecha: ${event.date}` : "",
+    event?.place ? `Lugar: ${event.place}` : "",
+    "",
+    `Parejas: ${totalPairs}`,
+    `Partidos jugados: ${completedMatches.length}/${matches.length}`,
+    "",
+    "*Podios*",
+    ...Object.entries(standingsByCategory).flatMap(([category, categoryStandings]) => [
+      "",
+      `_${category}_`,
+      ...categoryStandings.slice(0, 3).map((standing) => `${standing.position}. ${pairName(standing.pair)} - ${standing.points} pts`),
+    ]),
+    "",
+    "*Partidos más cerrados*",
+    ...(closeMatches.length ? closeMatches.map((item) => `- ${item.label}`) : ["- Sin resultados cargados"]),
+  ].filter((line) => line !== "").join("\n");
+
+  async function copySummary() {
+    await navigator.clipboard.writeText(shareText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  return (
+    <article className="post-event-summary">
+      <div className="block-head">
+        <div>
+          <h3><Trophy size={16} /> Post evento</h3>
+          <p className="muted">Resumen listo para cerrar y compartir el evento.</p>
+        </div>
+        <button type="button" className="secondary-action" onClick={copySummary} disabled={!standings.length && !completedMatches.length}>
+          <Clipboard size={16} /> {copied ? "Copiado" : "Copiar resumen"}
+        </button>
+      </div>
+
+      <div className="post-event-kpis">
+        <div>
+          <strong>{totalPairs}</strong>
+          <span>parejas</span>
+        </div>
+        <div>
+          <strong>{completedMatches.length}/{matches.length}</strong>
+          <span>partidos</span>
+        </div>
+        <div>
+          <strong>{Object.keys(standingsByCategory).length}</strong>
+          <span>categorías</span>
+        </div>
+      </div>
+
+      <div className="post-event-grid">
+        <section>
+          <h3>Podios</h3>
+          {Object.entries(standingsByCategory).length ? Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
+            <div className="podium-card" key={`podium-${category}`}>
+              <strong>{category}</strong>
+              {categoryStandings.slice(0, 3).map((standing) => (
+                <p key={standing.id}>
+                  <span>{standing.position}</span>
+                  {pairName(standing.pair)}
+                  <em>{standing.points} pts</em>
+                </p>
+              ))}
+            </div>
+          )) : <p className="empty">Recalcula el ranking para generar podios.</p>}
+        </section>
+
+        <section>
+          <h3>Partidos cerrados</h3>
+          {closeMatches.length ? closeMatches.map((item) => (
+            <div className="close-match-card" key={item.match.id}>
+              <strong>{item.label}</strong>
+              <span>Dif {item.diff}</span>
+            </div>
+          )) : <p className="empty">Carga resultados para destacar partidos.</p>}
+        </section>
+      </div>
+
+      <textarea className="post-event-share" value={shareText} readOnly />
+    </article>
+  );
+}
+
 function RankingConfigPanel({ config, setConfig, onSave }) {
   const mergedConfig = { ...defaultRankingConfig, ...(config || {}) };
   const tiebreakers = mergedConfig.tiebreakers?.length ? mergedConfig.tiebreakers : defaultRankingConfig.tiebreakers;
@@ -2998,8 +4193,24 @@ function PairSelect({ label, value, pairs, onChange }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} required>
       <option value="">{label}</option>
-      {pairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)}</option>)}
+      {pairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)} · N{pair.skill_level || 5}</option>)}
     </select>
+  );
+}
+
+function PlannerLevelChips({ pairOne, pairTwo }) {
+  if (!pairOne && !pairTwo) return null;
+  const diff = pairOne && pairTwo ? Math.abs(Number(pairOne.skill_level || 5) - Number(pairTwo.skill_level || 5)) : null;
+  return (
+    <div className="planner-level-chips">
+      {pairOne && <PairLevelBadge level={pairOne.skill_level} />}
+      {pairTwo && <PairLevelBadge level={pairTwo.skill_level} />}
+      {diff !== null && (
+        <span className={`level-gap ${diff <= 1 ? "ok" : diff <= 3 ? "watch" : "wide"}`}>
+          dif {diff}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -3132,6 +4343,50 @@ function roundRobinMatches(pairIds) {
   return rounds;
 }
 
+function balancedBattleGrid(pairs, roundCount, courtCount) {
+  const rounds = buildEmptyPlannerGrid(roundCount, courtCount);
+  const usedMatchups = new Set();
+  const allCandidates = [];
+
+  pairs.forEach((one, index) => {
+    pairs.slice(index + 1).forEach((two) => {
+      allCandidates.push({
+        one,
+        two,
+        key: matchupKey(one.id, two.id),
+        diff: Math.abs(Number(one.skill_level || 5) - Number(two.skill_level || 5)),
+      });
+    });
+  });
+
+  for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
+    const usedThisRound = new Set();
+    const rotatedCandidates = [...allCandidates].sort((left, right) => (
+      Number(usedMatchups.has(left.key)) - Number(usedMatchups.has(right.key))
+      || left.diff - right.diff
+      || ((left.one.id + left.two.id + roundIndex) % 7) - ((right.one.id + right.two.id + roundIndex) % 7)
+    ));
+
+    for (let courtIndex = 0; courtIndex < courtCount; courtIndex += 1) {
+      const candidate = rotatedCandidates.find((item) => (
+        !usedThisRound.has(item.one.id)
+        && !usedThisRound.has(item.two.id)
+        && (!usedMatchups.has(item.key) || usedMatchups.size >= allCandidates.length)
+      ));
+      if (!candidate) break;
+      rounds[roundIndex][courtIndex] = {
+        pair_one_id: String(candidate.one.id),
+        pair_two_id: String(candidate.two.id),
+      };
+      usedThisRound.add(candidate.one.id);
+      usedThisRound.add(candidate.two.id);
+      usedMatchups.add(candidate.key);
+    }
+  }
+
+  return rounds;
+}
+
 function parseCourtList(value) {
   const courts = String(value || "")
     .split(",")
@@ -3161,6 +4416,32 @@ function plannerRows(grid, courts, category, setMinutes, startTime) {
   }));
 }
 
+function pairUsageInRound(round) {
+  const usage = new Map();
+  round.forEach((slot, courtIndex) => {
+    for (const side of ["pair_one_id", "pair_two_id"]) {
+      const pairId = slot[side];
+      if (!pairId) continue;
+      usage.set(String(pairId), [...(usage.get(String(pairId)) || []), { courtIndex, side }]);
+    }
+  });
+  return usage;
+}
+
+function pairUsedElsewhereInRound(round, pairId, currentCourtIndex, currentSide) {
+  if (!pairId) return false;
+  const usage = pairUsageInRound(round).get(String(pairId)) || [];
+  return usage.some((item) => item.courtIndex !== currentCourtIndex || item.side !== currentSide);
+}
+
+function slotHasImpossibleDuplicate(round, slot, courtIndex) {
+  return Boolean(
+    (slot.pair_one_id && slot.pair_one_id === slot.pair_two_id)
+    || pairUsedElsewhereInRound(round, slot.pair_one_id, courtIndex, "pair_one_id")
+    || pairUsedElsewhereInRound(round, slot.pair_two_id, courtIndex, "pair_two_id")
+  );
+}
+
 function validatePlanner(grid, pairs, matches, options) {
   const rows = plannerRows(grid, options.courts, options.category, options.setMinutes, options.startTime);
   const plannedRows = rows.filter((row) => row.pair_one_id || row.pair_two_id);
@@ -3170,6 +4451,7 @@ function validatePlanner(grid, pairs, matches, options) {
   const matchupCounts = new Map();
   const playedCounts = new Map();
   const roundPlayers = new Map();
+  const roundDuplicateMessages = new Set();
 
   for (const row of plannedRows) {
     if (!row.pair_one_id || !row.pair_two_id) {
@@ -3188,7 +4470,12 @@ function validatePlanner(grid, pairs, matches, options) {
     const inRound = roundPlayers.get(row.roundIndex) || new Set();
     for (const pairId of [row.pair_one_id, row.pair_two_id]) {
       if (inRound.has(pairId)) {
-        issues.push(`Ronda ${row.roundIndex + 1}: ${pairName(pairById[Number(pairId)])} aparece mas de una vez.`);
+        const label = pairName(pairById[Number(pairId)]);
+        const message = `Ronda ${row.roundIndex + 1} (${row.time}): ${label} ya tiene partido en este turno. Una pareja no puede jugar en dos canchas a la misma hora.`;
+        if (!roundDuplicateMessages.has(message)) {
+          issues.push(message);
+          roundDuplicateMessages.add(message);
+        }
       }
       inRound.add(pairId);
       playedCounts.set(pairId, (playedCounts.get(pairId) || 0) + 1);
@@ -3240,6 +4527,7 @@ function validatePlanner(grid, pairs, matches, options) {
 
 function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixtureForm, startTime, run }) {
   const categories = pairCategoryOptions(pairs);
+  const pairById = useMemo(() => new Map(pairs.map((pair) => [String(pair.id), pair])), [pairs]);
   const [category, setCategory] = useState("");
   const [roundCount, setRoundCount] = useState(5);
   const [courtInput, setCourtInput] = useState(parseCourtList(fixtureForm.courts).slice(0, 3).join(", "));
@@ -3285,11 +4573,40 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   }
 
   function updateSlot(roundIndex, courtIndex, patch) {
-    setGrid((current) => current.map((round, currentRound) =>
-      round.map((slot, currentCourt) => (
-        currentRound === roundIndex && currentCourt === courtIndex ? { ...slot, ...patch } : slot
-      ))
-    ));
+    setGrid((current) => current.map((round, currentRound) => {
+      if (currentRound !== roundIndex) return round;
+      const changedSide = Object.prototype.hasOwnProperty.call(patch, "pair_one_id") ? "pair_one_id" : "pair_two_id";
+      const oppositeSide = changedSide === "pair_one_id" ? "pair_two_id" : "pair_one_id";
+      const selectedPairId = patch[changedSide] ? String(patch[changedSide]) : "";
+
+      return round.map((slot, currentCourt) => {
+        if (currentCourt === courtIndex) {
+          const nextSlot = { ...slot, ...patch };
+          if (selectedPairId && String(nextSlot[oppositeSide]) === selectedPairId) {
+            nextSlot[oppositeSide] = "";
+          }
+          return nextSlot;
+        }
+        if (!selectedPairId) return slot;
+        return {
+          ...slot,
+          pair_one_id: String(slot.pair_one_id) === selectedPairId ? "" : slot.pair_one_id,
+          pair_two_id: String(slot.pair_two_id) === selectedPairId ? "" : slot.pair_two_id,
+        };
+      });
+    }));
+  }
+
+  function dragPair(event, pairId) {
+    event.dataTransfer.setData("text/plain", String(pairId));
+    event.dataTransfer.effectAllowed = "copy";
+  }
+
+  function dropPair(event, roundIndex, courtIndex, side) {
+    event.preventDefault();
+    const pairId = event.dataTransfer.getData("text/plain");
+    if (!pairId) return;
+    updateSlot(roundIndex, courtIndex, { [side]: pairId });
   }
 
   function fillRoundRobin() {
@@ -3306,6 +4623,11 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     setGrid(buildEmptyPlannerGrid(nextRounds, courtCount).map((round, roundIndex) =>
       round.map((slot, courtIndex) => flatMatches[(roundIndex * courtCount) + courtIndex] || slot)
     ));
+  }
+
+  function fillBalancedBattles() {
+    if (categoryPairs.length < 2) return;
+    setGrid(balancedBattleGrid(categoryPairs, roundCount, courtCount));
   }
 
   function clearGrid() {
@@ -3365,6 +4687,9 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
           <button type="button" className="secondary-action" onClick={fillRoundRobin} disabled={categoryPairs.length < 2}>
             <Grid2X2 size={16} /> Proponer todos contra todos
           </button>
+          <button type="button" className="secondary-action" onClick={fillBalancedBattles} disabled={categoryPairs.length < 2}>
+            <Target size={16} /> Batallas equilibradas
+          </button>
           <button type="button" className="secondary-action" onClick={clearGrid}>
             Limpiar
           </button>
@@ -3383,6 +4708,24 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
           <span className={validation.minGames === validation.maxGames ? "ok" : "warning"}>
             {validation.minGames}-{validation.maxGames} partidos por pareja
           </span>
+        </div>
+
+        <div className="planner-pair-tray" aria-label="Parejas disponibles">
+          {categoryPairs.length ? categoryPairs.map((pair) => (
+            <button
+              type="button"
+              className="planner-pair-chip"
+              draggable
+              onDragStart={(event) => dragPair(event, pair.id)}
+              key={`tray-${pair.id}`}
+              title="Arrastra a una cancha"
+            >
+              <PairLevelBadge level={pair.skill_level} compact />
+              <span>{pairName(pair)}</span>
+            </button>
+          )) : (
+            <span className="empty">No hay parejas completas en esta categoría.</span>
+          )}
         </div>
 
         {validation.issues.length > 0 && (
@@ -3404,18 +4747,50 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
                   <strong>R{roundIndex + 1}</strong>
                   <span>{plannerTimeSlot(roundIndex, fixtureForm.set_minutes, plannerStartTime)}</span>
                 </div>
-                {round.map((slot, courtIndex) => (
-                  <div className="planner-slot" key={`slot-${roundIndex}-${courtIndex}`}>
+                {round.map((slot, courtIndex) => {
+                  const hasImpossibleDuplicate = slotHasImpossibleDuplicate(round, slot, courtIndex);
+                  return (
+                  <div className={`planner-slot ${hasImpossibleDuplicate ? "impossible" : ""}`} key={`slot-${roundIndex}-${courtIndex}`}>
+                    <div
+                      className="planner-drop-zone"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => dropPair(event, roundIndex, courtIndex, "pair_one_id")}
+                    >
                     <select value={slot.pair_one_id} onChange={(event) => updateSlot(roundIndex, courtIndex, { pair_one_id: event.target.value })}>
                       <option value="">Pareja 1</option>
-                      {categoryPairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)}</option>)}
+                      {categoryPairs.map((pair) => (
+                        <option
+                          key={pair.id}
+                          value={pair.id}
+                          disabled={pairUsedElsewhereInRound(round, pair.id, courtIndex, "pair_one_id")}
+                        >
+                          {pairName(pair)} · N{pair.skill_level || 5}
+                        </option>
+                      ))}
                     </select>
+                    </div>
+                    <div
+                      className="planner-drop-zone"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => dropPair(event, roundIndex, courtIndex, "pair_two_id")}
+                    >
                     <select value={slot.pair_two_id} onChange={(event) => updateSlot(roundIndex, courtIndex, { pair_two_id: event.target.value })}>
                       <option value="">Pareja 2</option>
-                      {categoryPairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)}</option>)}
+                      {categoryPairs.map((pair) => (
+                        <option
+                          key={pair.id}
+                          value={pair.id}
+                          disabled={pairUsedElsewhereInRound(round, pair.id, courtIndex, "pair_two_id")}
+                        >
+                          {pairName(pair)} · N{pair.skill_level || 5}
+                        </option>
+                      ))}
                     </select>
+                    </div>
+                    <PlannerLevelChips pairOne={pairById.get(slot.pair_one_id)} pairTwo={pairById.get(slot.pair_two_id)} />
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -3605,30 +4980,7 @@ function FixturePreview({ matches, pairs, configuredCourts, resultForm, setResul
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [turnFilter, setTurnFilter] = useState("all");
 
-  const scheduledRows = matches
-    .map((match) => {
-      const schedule = parseFixtureRound(match.round_name);
-      const one = pairs.find((pair) => pair.id === match.pair_one_id);
-      const two = pairs.find((pair) => pair.id === match.pair_two_id);
-      const category = fixtureCategoryFromPairs(one, two, schedule.category);
-      return {
-        category,
-        court: match.court || "",
-        courtLabel: normalizeCourt(match.court),
-        done: hasResult(match),
-        group: schedule.group,
-        match,
-        pairOne: one ? pairName(one) : `Pareja ${match.pair_one_id}`,
-        pairTwo: two ? pairName(two) : `Pareja ${match.pair_two_id}`,
-        time: schedule.time,
-        turn: schedule.turn,
-      };
-    })
-    .sort((a, b) => {
-      const timeCompare = minutesFromSlot(a.time) - minutesFromSlot(b.time);
-      if (timeCompare !== 0) return timeCompare;
-      return String(a.court || "zz").localeCompare(String(b.court || "zz"), undefined, { numeric: true });
-    });
+  const scheduledRows = scheduledMatchRows(matches, pairs);
 
   const categories = [...new Set(scheduledRows.map((row) => row.category))];
   const turns = [...new Set(scheduledRows.map((row) => row.turn))];

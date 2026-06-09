@@ -35,6 +35,8 @@ def ensure_local_schema() -> None:
             connection.execute(text("ALTER TABLE events ADD COLUMN category_configs JSON DEFAULT '[]'"))
         if "ranking_config" not in columns:
             connection.execute(text("ALTER TABLE events ADD COLUMN ranking_config JSON DEFAULT '{}'"))
+        if "status" not in columns:
+            connection.execute(text("ALTER TABLE events ADD COLUMN status VARCHAR(19) NOT NULL DEFAULT 'registration_open'"))
         if "users" in table_names:
             user_columns = {column["name"] for column in inspector.get_columns("users")}
             if "phone" not in user_columns:
@@ -68,10 +70,16 @@ def ensure_local_schema() -> None:
                         """
                     )
                 )
+        if "event_pairs" in table_names:
+            pair_columns = {column["name"] for column in inspector.get_columns("event_pairs")}
+            if "skill_level" not in pair_columns:
+                connection.execute(text("ALTER TABLE event_pairs ADD COLUMN skill_level INTEGER NOT NULL DEFAULT 5"))
         if "event_registrations" in table_names:
             registration_columns = {column["name"] for column in inspector.get_columns("event_registrations")}
             if "identity_key" not in registration_columns:
                 connection.execute(text("ALTER TABLE event_registrations ADD COLUMN identity_key VARCHAR(160)"))
+            if "checked_in" not in registration_columns:
+                connection.execute(text("ALTER TABLE event_registrations ADD COLUMN checked_in BOOLEAN NOT NULL DEFAULT 0"))
             duplicate_identities = connection.execute(
                 text(
                     """

@@ -23,6 +23,7 @@ from app.schemas.auth import (
     AuthResponse,
     LoginRequest,
     ModulePermission,
+    PasswordResetResponse,
     PlayerSignup,
     RolePermissionRead,
     RolePermissionUpdate,
@@ -33,6 +34,12 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def temporary_password() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    groups = ["".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(3)]
+    return "-".join(groups)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -178,6 +185,25 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/users/{user_id}/reset-password", response_model=PasswordResetResponse)
+def reset_user_password(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(require_permission("users")),
+) -> PasswordResetResponse:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if user.role == UserRole.superadmin and current.role != UserRole.superadmin:
+        raise HTTPException(status_code=403, detail="Solo un superadmin puede restaurar la clave de otro superadmin")
+
+    password = temporary_password()
+    user.password_hash = hash_password(password)
+    db.commit()
+    db.refresh(user)
+    return PasswordResetResponse(user=UserRead.model_validate(user), temporary_password=password)
 
 
 @router.patch("/users/{user_id}", response_model=UserRead)

@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -21,6 +23,7 @@ def create_match(
     db: Session = Depends(get_db),
     _: User = Depends(require_permission("events")),
 ) -> Match:
+    _validate_match_schedule(db, event_id, [payload])
     match = Match(event_id=event_id, **payload.model_dump())
     db.add(match)
     db.commit()
@@ -37,6 +40,7 @@ def create_matches_bulk(
 ) -> list[Match]:
     if not payload.matches:
         raise HTTPException(status_code=400, detail="Agrega al menos un partido")
+    _validate_match_schedule(db, event_id, payload.matches, replace_unplayed=payload.replace_unplayed)
     if payload.replace_unplayed:
         db.execute(
             delete(Match).where(
@@ -190,6 +194,55 @@ def list_result_submissions(
             (EventPair.player_one.has(user_id=user.id)) | (EventPair.player_two.has(user_id=user.id))
         )
     return list(db.scalars(query.order_by(MatchResultSubmission.updated_at.desc())))
+
+
+def _schedule_key(round_name: str | None) -> str:
+    value = round_name or "Grupo"
+    match = re.search(r"\d{1,2}:\d{2}-\d{1,2}:\d{2}", value)
+    return match.group(0) if match else value
+
+
+def _validate_match_schedule(
+    db: Session,
+    event_id: int,
+    proposed: list[MatchCreate],
+    *,
+    replace_unplayed: bool = False,
+) -> None:
+    rows: list[tuple[str, int, int, str | None]] = []
+    existing = db.scalars(select(Match).where(Match.event_id == event_id)).all()
+    for match in existing:
+        if replace_unplayed and match.pair_one_score is None and match.pair_two_score is None:
+            continue
+        rows.append((_schedule_key(match.round_name), match.pair_one_id, match.pair_two_id, match.court))
+
+    for item in proposed:
+        if item.pair_one_id == item.pair_two_id:
+            raise HTTPException(status_code=400, detail="Una pareja no puede jugar contra si misma")
+        rows.append((_schedule_key(item.round_name), item.pair_one_id, item.pair_two_id, item.court))
+
+    used_by_slot: dict[str, dict[int, str]] = {}
+    pair_ids = {pair_id for _, one_id, two_id, _ in rows for pair_id in (one_id, two_id)}
+    pair_names = {
+        pair.id: f"{pair.player_one.name} / {pair.player_two.name if pair.player_two else 'buscando partner'}"
+        for pair in db.scalars(select(EventPair).where(EventPair.id.in_(pair_ids))).all()
+    }
+
+    for slot, pair_one_id, pair_two_id, court in rows:
+        used = used_by_slot.setdefault(slot, {})
+        for pair_id in (pair_one_id, pair_two_id):
+            if pair_id in used:
+                label = pair_names.get(pair_id, f"Pareja {pair_id}")
+                first_court = used[pair_id] or "sin cancha"
+                next_court = court or "sin cancha"
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{label} ya tiene partido en el turno {slot} "
+                        f"({first_court} y {next_court}). Una pareja no puede jugar en dos canchas a la misma hora."
+                    ),
+                )
+            used[pair_id] = court or ""
 
 
 def _match_with_pairs(db: Session, event_id: int, match_id: int) -> Match:
