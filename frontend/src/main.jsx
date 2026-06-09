@@ -1040,6 +1040,7 @@ function App() {
       payments={payments}
       registrations={registrations}
       matches={matches}
+      resultSubmissions={resultSubmissions}
       standings={standings}
       ranking={ranking}
       selectedEvent={selectedEvent}
@@ -2189,6 +2190,7 @@ function EventsPage(props) {
     payments,
     registrations,
     matches,
+    resultSubmissions = [],
     standings,
     ranking,
     selectedEvent,
