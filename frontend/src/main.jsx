@@ -2576,105 +2576,6 @@ function EventsPage(props) {
                 />
                 <div className="fixture-workbench">
                   <div>
-                    <details className="fixture-config" open={!matches.length}>
-                      <summary>Configurar programación</summary>
-                    <div className={`fixture-save-state ${fixtureSaveState}`}>
-                      {fixtureSaveState === "saving"
-                        ? "Guardando configuración..."
-                        : fixtureSaveState === "error"
-                          ? "No se pudo guardar la configuración"
-                          : "Configuración guardada"}
-                    </div>
-                    <div className="fixture-controls">
-                      <label className="wide-field">
-                        Modalidad
-                        <select
-                          value={fixtureForm.mode}
-                          onChange={(e) => setFixtureForm({
-                            ...fixtureForm,
-                            mode: e.target.value,
-                            group_size: e.target.value === "groups_finals" ? 4 : fixtureForm.group_size,
-                            guaranteed_matches: e.target.value === "groups_finals" ? 3 : fixtureForm.guaranteed_matches,
-                          })}
-                        >
-                          <option value="groups">Todos contra todos por grupos</option>
-                          <option value="groups_finals">2 grupos + finales</option>
-                          <option value="bracket">Torneo desde ranking</option>
-                        </select>
-                      </label>
-                      <label>
-                        Parejas por grupo
-                        <input type="number" min="2" value={fixtureForm.group_size} onChange={(e) => setFixtureForm({ ...fixtureForm, group_size: e.target.value })} />
-                      </label>
-                      <label>
-                        Partidos garantizados
-                        <input type="number" min="1" value={fixtureForm.guaranteed_matches} onChange={(e) => setFixtureForm({ ...fixtureForm, guaranteed_matches: e.target.value })} />
-                      </label>
-                      <label>
-                        Minutos por set
-                        <input type="number" min="1" value={fixtureForm.set_minutes} onChange={(e) => setFixtureForm({ ...fixtureForm, set_minutes: e.target.value })} />
-                      </label>
-                      <label>
-                        Paleteo previo
-                        <select value={fixtureForm.warmup_minutes} onChange={(e) => setFixtureForm({ ...fixtureForm, warmup_minutes: e.target.value })}>
-                          <option value="0">Sin paleteo</option>
-                          <option value="5">5 minutos</option>
-                          <option value="10">10 minutos</option>
-                        </select>
-                      </label>
-                      <label>
-                        Cantidad canchas
-                        <input
-                          type="number"
-                          min="1"
-                          value={fixtureForm.court_count}
-                          onChange={(e) => {
-                            const count = Number(e.target.value) || 1;
-                            setFixtureForm({
-                              ...fixtureForm,
-                              court_count: e.target.value,
-                              courts: Array.from({ length: count }, (_, index) => String(index + 1)).join(", "),
-                            });
-                          }}
-                        />
-                      </label>
-                      <label className="wide-field">
-                        Números de cancha
-                        <input placeholder="1, 2, 3" value={fixtureForm.courts} onChange={(e) => setFixtureForm({ ...fixtureForm, courts: e.target.value })} />
-                      </label>
-                      <div className={`fixture-timing wide-field ${fixtureTiming.valid ? "ok" : "warning"}`}>
-                        <strong>
-                          {fixtureTiming.valid
-                            ? `Primer partido ${fixtureTiming.fixtureStart} · bloque útil ${fixtureTiming.rentalMinutes} min`
-                            : "Define inicio y término en el tab Evento"}
-                        </strong>
-                        <span>
-                          Horario evento: {selectedEvent?.schedule || eventForm.schedule || "sin horario"}.
-                          {fixtureTiming.valid ? ` Paleteo: ${fixtureTiming.warmupMinutes} min antes de iniciar.` : " La programación usará ese horario automáticamente."}
-                        </span>
-                      </div>
-                      <div className={`fixture-advice wide-field ${configuredCourts < recommendedCourtsWithFinals ? "warning" : "ok"}`}>
-                        <strong>{recommendedCourtsWithFinals || 0} canchas recomendadas con finales</strong>
-                        <span>
-                          {estimatedMatches} partidos de fase + {finalMatches} finales/terceros en {categoriesWithFinals} categoría(s).
-                          {` ${slotsPerCourt} turnos por cancha.`}
-                          {configuredCourts < recommendedCourtsWithFinals
-                            ? ` Con ${configuredCourts || 0} cancha(s) no alcanza para jugar grupos y finales.`
-                            : " La configuración alcanza para el bloque."}
-                        </span>
-                        <small>Sin finales: {recommendedCourts || 0} cancha(s). Para cada categoría se estima final y partido por 3er lugar.</small>
-                      </div>
-                      {fixtureForm.mode === "groups" || fixtureForm.mode === "groups_finals" ? (
-                        <button className="secondary-action wide-field" type="button" onClick={submitGenerateFixture} disabled={!selectedEventId}>
-                          <Swords size={16} /> {fixtureForm.mode === "groups_finals" ? "Generar grupos + finales" : "Generar todo el evento"}
-                        </button>
-                      ) : (
-                        <button className="secondary-action wide-field" type="button" onClick={submitGenerateBracket} disabled={!selectedEventId}>
-                          <Swords size={16} /> Generar torneo desde ranking
-                        </button>
-                      )}
-                    </div>
-                    </details>
                     <ManualFixturePlanner
                       eventId={selectedEventId}
                       pairs={pairs}
@@ -2684,16 +2585,6 @@ function EventsPage(props) {
                       startTime={fixtureTiming.fixtureStart || fixtureForm.start_time}
                       run={run}
                     />
-                    <details className="manual-match">
-                      <summary>Agregar partido manual</summary>
-                    <form onSubmit={submitMatch} className="compact-form">
-                      <PairSelect label="Pareja 1" value={matchForm.pair_one_id} pairs={pairs} onChange={(value) => setMatchForm({ ...matchForm, pair_one_id: value })} />
-                      <PairSelect label="Pareja 2" value={matchForm.pair_two_id} pairs={pairs} onChange={(value) => setMatchForm({ ...matchForm, pair_two_id: value })} />
-                      <input placeholder="Ronda" value={matchForm.round_name} onChange={(e) => setMatchForm({ ...matchForm, round_name: e.target.value })} />
-                      <input placeholder="Cancha" value={matchForm.court} onChange={(e) => setMatchForm({ ...matchForm, court: e.target.value })} />
-                      <button><Swords size={16} /> Crear partido</button>
-                    </form>
-                    </details>
                   </div>
                 </div>
                 <FixturePreview
@@ -4518,6 +4409,36 @@ function roundRobinMatches(pairIds) {
   return rounds;
 }
 
+function plannerGroupLabels(count) {
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  return Array.from({ length: Math.max(1, Number(count) || 1) }, (_, index) => `Grupo ${letters[index] || index + 1}`);
+}
+
+function balancedGroupAssignments(pairs, groupCount) {
+  const labels = plannerGroupLabels(groupCount);
+  const orderedPairs = [...pairs].sort((left, right) => (
+    Number(right.skill_level || 5) - Number(left.skill_level || 5)
+    || (left.seed || 9999) - (right.seed || 9999)
+    || left.id - right.id
+  ));
+  return orderedPairs.reduce((acc, pair, index) => {
+    const cycle = index % (labels.length * 2);
+    const labelIndex = cycle < labels.length ? cycle : labels.length - 1 - (cycle - labels.length);
+    acc[String(pair.id)] = labels[labelIndex];
+    return acc;
+  }, {});
+}
+
+function getPlannerGroup(assignments, pairId) {
+  return pairId ? assignments[String(pairId)] || "" : "";
+}
+
+function plannerSlotGroup(slot, assignments) {
+  const oneGroup = getPlannerGroup(assignments, slot.pair_one_id);
+  const twoGroup = getPlannerGroup(assignments, slot.pair_two_id);
+  return oneGroup && oneGroup === twoGroup ? oneGroup : "";
+}
+
 function matchCategoryPlans(pairs) {
   const groups = pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id)
@@ -4669,15 +4590,18 @@ function plannerTimeSlot(roundIndex, setMinutes, startTime) {
   return `${String(Math.floor(slotStart / 60)).padStart(2, "0")}:${String(slotStart % 60).padStart(2, "0")}-${String(Math.floor(slotEnd / 60)).padStart(2, "0")}:${String(slotEnd % 60).padStart(2, "0")}`;
 }
 
-function plannerRows(grid, courts, category, setMinutes, startTime) {
+function plannerRows(grid, courts, category, setMinutes, startTime, groupAssignments = {}) {
   return grid.flatMap((round, roundIndex) => round.map((slot, courtIndex) => {
     const time = plannerTimeSlot(roundIndex, setMinutes, startTime);
+    const groupName = plannerSlotGroup(slot, groupAssignments);
+    const stageName = groupName || "Programacion manual";
     return {
       ...slot,
       court: courts[courtIndex] || String(courtIndex + 1),
       courtIndex,
       roundIndex,
-      roundName: `${category || "Categoria"} - Programacion manual - Ronda ${roundIndex + 1} - ${time}`,
+      groupName,
+      roundName: `${category || "Categoria"} - ${stageName} - Ronda ${roundIndex + 1} - ${time}`,
       time,
     };
   }));
@@ -4710,7 +4634,7 @@ function slotHasImpossibleDuplicate(round, slot, courtIndex) {
 }
 
 function validatePlanner(grid, pairs, matches, options) {
-  const rows = plannerRows(grid, options.courts, options.category, options.setMinutes, options.startTime);
+  const rows = plannerRows(grid, options.courts, options.category, options.setMinutes, options.startTime, options.groupAssignments);
   const plannedRows = rows.filter((row) => row.pair_one_id || row.pair_two_id);
   const completeRows = rows.filter((row) => row.pair_one_id && row.pair_two_id && row.pair_one_id !== row.pair_two_id);
   const pairById = Object.fromEntries(pairs.map((pair) => [pair.id, pair]));
@@ -4733,6 +4657,11 @@ function validatePlanner(grid, pairs, matches, options) {
     const two = pairById[Number(row.pair_two_id)];
     if (options.category && (one?.category !== options.category || two?.category !== options.category)) {
       issues.push(`Ronda ${row.roundIndex + 1}, cancha ${row.court}: hay parejas fuera de ${options.category}.`);
+    }
+    const oneGroup = getPlannerGroup(options.groupAssignments || {}, row.pair_one_id);
+    const twoGroup = getPlannerGroup(options.groupAssignments || {}, row.pair_two_id);
+    if (oneGroup && twoGroup && oneGroup !== twoGroup) {
+      issues.push(`Ronda ${row.roundIndex + 1}, cancha ${row.court}: cruza ${oneGroup} con ${twoGroup}.`);
     }
     const inRound = roundPlayers.get(row.roundIndex) || new Set();
     for (const pairId of [row.pair_one_id, row.pair_two_id]) {
@@ -4773,8 +4702,16 @@ function validatePlanner(grid, pairs, matches, options) {
     .filter((pair) => pair.status === "completa" && pair.player_two_id && (!options.category || pair.category === options.category))
     .map((pair) => String(pair.id));
   const allPossibleKeys = [];
-  activePairIds.forEach((oneId, index) => {
-    activePairIds.slice(index + 1).forEach((twoId) => allPossibleKeys.push(matchupKey(oneId, twoId)));
+  const assignments = options.groupAssignments || {};
+  const groupedPairIds = activePairIds.reduce((acc, pairId) => {
+    const groupName = getPlannerGroup(assignments, pairId) || "Sin grupo";
+    acc[groupName] = [...(acc[groupName] || []), pairId];
+    return acc;
+  }, {});
+  Object.values(groupedPairIds).forEach((groupPairIds) => {
+    groupPairIds.forEach((oneId, index) => {
+      groupPairIds.slice(index + 1).forEach((twoId) => allPossibleKeys.push(matchupKey(oneId, twoId)));
+    });
   });
   const missingRoundRobin = allPossibleKeys.filter((key) => !matchupCounts.has(key));
   const balancedCounts = activePairIds.map((id) => playedCounts.get(id) || 0);
@@ -4798,6 +4735,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   const [category, setCategory] = useState(fixtureForm.planner_category || "");
   const [roundCount, setRoundCount] = useState(Number(fixtureForm.planner_rounds || 5));
   const [courtInput, setCourtInput] = useState(fixtureForm.planner_courts || parseCourtList(fixtureForm.courts).slice(0, 3).join(", "));
+  const [groupCount, setGroupCount] = useState(Number(fixtureForm.planner_group_count || 2));
   const [replaceUnplayed, setReplaceUnplayed] = useState(fixtureForm.planner_replace_unplayed ?? true);
   const [grid, setGrid] = useState(() => buildEmptyPlannerGrid(Number(fixtureForm.planner_rounds || 5), parseCourtList(fixtureForm.planner_courts || fixtureForm.courts).length || 3));
   const normalizedCourts = parseCourtList(courtInput);
@@ -4806,6 +4744,18 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   const categoryPairs = pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id && (!activeCategory || pair.category === activeCategory))
     .sort((a, b) => (a.seed || 9999) - (b.seed || 9999) || a.id - b.id);
+  const savedGroupAssignments = fixtureForm.planner_group_assignments?.[activeCategory] || {};
+  const defaultGroupAssignments = useMemo(
+    () => balancedGroupAssignments(categoryPairs, groupCount),
+    [categoryPairs.map((pair) => `${pair.id}:${pair.skill_level || 5}:${pair.seed || ""}`).join("|"), groupCount]
+  );
+  const groupAssignments = {
+    ...defaultGroupAssignments,
+    ...Object.fromEntries(
+      Object.entries(savedGroupAssignments).filter(([pairId]) => categoryPairs.some((pair) => String(pair.id) === String(pairId)))
+    ),
+  };
+  const groupLabels = plannerGroupLabels(groupCount);
   const activeRoundRobin = roundRobinMatches(categoryPairs.map((pair) => pair.id));
   const activePlan = {
     pairs: categoryPairs.length,
@@ -4820,6 +4770,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     replaceUnplayed,
     setMinutes: Number(fixtureForm.set_minutes || 20),
     startTime: plannerStartTime,
+    groupAssignments,
   });
 
   useEffect(() => {
@@ -4829,12 +4780,49 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   useEffect(() => {
     const nextCourts = fixtureForm.planner_courts || parseCourtList(fixtureForm.courts).slice(0, 3).join(", ");
     const nextRounds = Number(fixtureForm.planner_rounds || 5);
+    const nextGroupCount = Number(fixtureForm.planner_group_count || 2);
     setCategory(fixtureForm.planner_category || "");
     setRoundCount(nextRounds);
     setCourtInput(nextCourts);
+    setGroupCount(nextGroupCount);
     setReplaceUnplayed(fixtureForm.planner_replace_unplayed ?? true);
     setGrid(buildEmptyPlannerGrid(nextRounds, parseCourtList(nextCourts).length || 1));
   }, [eventId]);
+
+  function persistGroupAssignments(nextAssignments, nextGroupCount = groupCount) {
+    setFixtureForm({
+      ...fixtureForm,
+      planner_group_count: nextGroupCount,
+      planner_group_assignments: {
+        ...(fixtureForm.planner_group_assignments || {}),
+        [activeCategory]: nextAssignments,
+      },
+    });
+  }
+
+  function updateGroupCount(value) {
+    const nextGroupCount = Math.max(1, Number(value) || 1);
+    const labels = plannerGroupLabels(nextGroupCount);
+    const nextAssignments = Object.fromEntries(
+      categoryPairs.map((pair) => {
+        const current = groupAssignments[String(pair.id)];
+        return [String(pair.id), labels.includes(current) ? current : labels[0]];
+      })
+    );
+    setGroupCount(nextGroupCount);
+    persistGroupAssignments(nextAssignments, nextGroupCount);
+  }
+
+  function updatePairGroup(pairId, groupName) {
+    persistGroupAssignments({
+      ...groupAssignments,
+      [String(pairId)]: groupName,
+    });
+  }
+
+  function distributeGroups() {
+    persistGroupAssignments(balancedGroupAssignments(categoryPairs, groupCount));
+  }
 
   function resize(nextRounds, nextCourtCount = courtCount, persist = true) {
     const rounds = Math.max(1, Number(nextRounds) || 1);
@@ -5015,12 +5003,6 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
             />
             <span>Reemplazar esta categoría</span>
           </label>
-          <button type="button" className="secondary-action" onClick={fillRoundRobin} disabled={categoryPairs.length < 2}>
-            <Grid2X2 size={16} /> Todos contra todos
-          </button>
-          <button type="button" className="secondary-action" onClick={fillBalancedBattles} disabled={categoryPairs.length < 2}>
-            <Target size={16} /> Por nivel
-          </button>
           <button type="button" className="secondary-action" onClick={clearGrid}>
             Limpiar
           </button>
@@ -5028,6 +5010,37 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
             <Save size={16} /> Guardar {validation.plannedCount || ""}
           </button>
         </div>
+
+        <section className="planner-group-board" aria-label="Configuración de grupos">
+          <div className="planner-group-toolbar">
+            <div>
+              <span>Grupos del planner</span>
+              <strong>{groupLabels.length} grupo{groupLabels.length === 1 ? "" : "s"} para {activeCategory || "la categoría"}</strong>
+            </div>
+            <label>
+              Cantidad
+              <input type="number" min="1" max="8" value={groupCount} onChange={(event) => updateGroupCount(event.target.value)} />
+            </label>
+            <button type="button" className="secondary-action" onClick={distributeGroups} disabled={categoryPairs.length < 2}>
+              Distribuir grupos
+            </button>
+          </div>
+          <div className="planner-group-grid">
+            {categoryPairs.length ? categoryPairs.map((pair) => (
+              <label className="planner-group-card" key={`group-${pair.id}`}>
+                <span>
+                  <PairLevelBadge level={pair.skill_level} compact />
+                  <b>{pairName(pair)}</b>
+                </span>
+                <select value={groupAssignments[String(pair.id)] || groupLabels[0]} onChange={(event) => updatePairGroup(pair.id, event.target.value)}>
+                  {groupLabels.map((label) => <option key={`${pair.id}-${label}`} value={label}>{label}</option>)}
+                </select>
+              </label>
+            )) : (
+              <p className="empty">No hay parejas completas para agrupar.</p>
+            )}
+          </div>
+        </section>
 
         <div className="planner-validation">
           <span className={validation.issues.length ? "warning" : "ok"}>

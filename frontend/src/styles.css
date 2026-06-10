@@ -1516,7 +1516,7 @@ h3 {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(170px, 1.1fr) 84px 92px minmax(150px, 0.9fr) 86px minmax(150px, 0.8fr) repeat(4, auto);
+  grid-template-columns: minmax(170px, 1.1fr) 84px 92px minmax(150px, 0.9fr) 86px minmax(150px, 0.8fr) repeat(2, auto);
 }
 
 .planner-toolbar label {
@@ -1560,6 +1560,82 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.planner-group-board {
+  background: #f7fbfd;
+  border: 1px solid #d9e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.planner-group-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1fr) 100px auto;
+}
+
+.planner-group-toolbar > div {
+  display: grid;
+  gap: 3px;
+}
+
+.planner-group-toolbar span,
+.planner-group-toolbar label {
+  color: #0e5d8f;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.planner-group-toolbar strong {
+  color: #08223b;
+  font-size: 0.95rem;
+}
+
+.planner-group-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.planner-group-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.planner-group-card {
+  align-items: center;
+  background: #fffefa;
+  border: 1px solid #c7d9e4;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.planner-group-card > span {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.planner-group-card b {
+  color: #08223b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-group-card select {
+  min-height: 34px;
+  padding: 6px 8px;
 }
 
 .planner-pair-tray {
@@ -5079,6 +5155,7 @@ h3 {
   .player-match-card,
   .operations-status,
   .match-planning-main,
+  .planner-group-toolbar,
   .planner-command {
     grid-template-columns: 1fr;
   }
