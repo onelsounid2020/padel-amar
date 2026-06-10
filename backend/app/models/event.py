@@ -30,6 +30,7 @@ class Event(Base):
     tournament_type: Mapped[str] = mapped_column(String(80), nullable=False)
     category_configs: Mapped[list[dict]] = mapped_column(JSON, default=list)
     ranking_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    fixture_config: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.registration_open, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True)

@@ -37,6 +37,7 @@ const emptyEvent = {
   tournament_type: "Americano",
   category_configs: [],
   ranking_config: {},
+  fixture_config: {},
   description: "",
   status: "registration_open",
   is_active: true,
@@ -47,6 +48,22 @@ const defaultRankingConfig = {
   draw_points: 1,
   loss_points: 0,
   tiebreakers: ["points", "won", "difference", "points_for"],
+};
+
+const defaultFixtureConfig = {
+  mode: "groups",
+  group_size: 4,
+  guaranteed_matches: 5,
+  court_count: 11,
+  courts: "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11",
+  rental_minutes: 120,
+  warmup_minutes: 10,
+  set_minutes: 20,
+  start_time: "17:00",
+  planner_category: "",
+  planner_rounds: 5,
+  planner_courts: "1, 2, 3",
+  planner_replace_unplayed: true,
 };
 
 const eventStatusOptions = [
@@ -239,17 +256,7 @@ function App() {
   const [playerForm, setPlayerForm] = useState(emptyPlayer);
   const [pairForm, setPairForm] = useState({ player_one_id: "", player_two_id: "", category: "", skill_level: 5, status: "buscando_partner" });
   const [matchForm, setMatchForm] = useState({ pair_one_id: "", pair_two_id: "", round_name: "Grupo", court: "" });
-  const [fixtureForm, setFixtureForm] = useState({
-    mode: "groups",
-    group_size: 4,
-    guaranteed_matches: 5,
-    court_count: 11,
-    courts: "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11",
-    rental_minutes: 120,
-    warmup_minutes: 10,
-    set_minutes: 20,
-    start_time: "17:00",
-  });
+  const [fixtureForm, setFixtureForm] = useState(defaultFixtureConfig);
   const [rankingConfigForm, setRankingConfigForm] = useState(defaultRankingConfig);
   const [resultForm, setResultForm] = useState({});
   const [publicForm, setPublicForm] = useState(emptyPublicRegistration);
@@ -531,8 +538,9 @@ function App() {
             guaranteed_matches: Number(config.guaranteed_matches || 0),
             qualifiers_per_group: Number(config.qualifiers_per_group || 0),
             notes: config.notes || "",
-          })),
+        })),
         ranking_config: eventForm.ranking_config || rankingConfigForm || defaultRankingConfig,
+        fixture_config: eventForm.fixture_config || fixtureForm || defaultFixtureConfig,
       };
       if (!selectedEventId) payload.is_active = true;
       if (selectedEventId) {
@@ -2255,6 +2263,9 @@ function EventsPage(props) {
     authUser,
     run,
   } = props;
+  const fixtureConfig = { ...defaultFixtureConfig, ...(fixtureForm || {}) };
+  const fixtureConfigKey = JSON.stringify(fixtureConfig);
+  const storedFixtureConfigKey = JSON.stringify({ ...defaultFixtureConfig, ...(selectedEvent?.fixture_config || {}) });
   const visibleEvents = showClosedEvents ? events : events.filter(isEventActive);
   const pastActiveCount = events.filter((event) => isEventActive(event) && isPastEvent(event)).length;
   const completePairsCount = pairs.filter((pair) => pair.status === "completa" && pair.player_two_id).length;
@@ -2293,12 +2304,23 @@ function EventsPage(props) {
       tournament_type: selectedEvent.tournament_type || "Americano",
       category_configs: selectedEvent.category_configs || [],
       ranking_config: selectedEvent.ranking_config || {},
+      fixture_config: selectedEvent.fixture_config || {},
       description: selectedEvent.description || "",
       is_active: selectedEvent.is_active ?? true,
       status: selectedEvent.status || "registration_open",
     });
     setRankingConfigForm({ ...defaultRankingConfig, ...(selectedEvent.ranking_config || {}) });
+    setFixtureForm({ ...defaultFixtureConfig, ...(selectedEvent.fixture_config || {}) });
   }, [selectedEvent?.id]);
+
+  useEffect(() => {
+    setEventForm((current) => ({ ...current, fixture_config: fixtureConfig }));
+    if (!selectedEventId || !selectedEvent || fixtureConfigKey === storedFixtureConfigKey) return undefined;
+    const timeout = window.setTimeout(() => {
+      api.updateEvent(selectedEventId, { fixture_config: fixtureConfig }).catch(() => {});
+    }, 700);
+    return () => window.clearTimeout(timeout);
+  }, [selectedEventId, selectedEvent?.id, fixtureConfigKey, storedFixtureConfigKey]);
 
   return (
     <section className="workspace">
@@ -4558,11 +4580,11 @@ function validatePlanner(grid, pairs, matches, options) {
 function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixtureForm, startTime, run }) {
   const categories = pairCategoryOptions(pairs);
   const pairById = useMemo(() => new Map(pairs.map((pair) => [String(pair.id), pair])), [pairs]);
-  const [category, setCategory] = useState("");
-  const [roundCount, setRoundCount] = useState(5);
-  const [courtInput, setCourtInput] = useState(parseCourtList(fixtureForm.courts).slice(0, 3).join(", "));
-  const [replaceUnplayed, setReplaceUnplayed] = useState(true);
-  const [grid, setGrid] = useState(() => buildEmptyPlannerGrid(5, 3));
+  const [category, setCategory] = useState(fixtureForm.planner_category || "");
+  const [roundCount, setRoundCount] = useState(Number(fixtureForm.planner_rounds || 5));
+  const [courtInput, setCourtInput] = useState(fixtureForm.planner_courts || parseCourtList(fixtureForm.courts).slice(0, 3).join(", "));
+  const [replaceUnplayed, setReplaceUnplayed] = useState(fixtureForm.planner_replace_unplayed ?? true);
+  const [grid, setGrid] = useState(() => buildEmptyPlannerGrid(Number(fixtureForm.planner_rounds || 5), parseCourtList(fixtureForm.planner_courts || fixtureForm.courts).length || 3));
   const normalizedCourts = parseCourtList(courtInput);
   const courtCount = normalizedCourts.length;
   const activeCategory = category || categories[0] || "";
@@ -4582,10 +4604,26 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     if (!category && categories[0]) setCategory(categories[0]);
   }, [categories.join("|")]);
 
-  function resize(nextRounds, nextCourtCount = courtCount) {
+  useEffect(() => {
+    const nextCourts = fixtureForm.planner_courts || parseCourtList(fixtureForm.courts).slice(0, 3).join(", ");
+    const nextRounds = Number(fixtureForm.planner_rounds || 5);
+    setCategory(fixtureForm.planner_category || "");
+    setRoundCount(nextRounds);
+    setCourtInput(nextCourts);
+    setReplaceUnplayed(fixtureForm.planner_replace_unplayed ?? true);
+    setGrid(buildEmptyPlannerGrid(nextRounds, parseCourtList(nextCourts).length || 1));
+  }, [eventId]);
+
+  function resize(nextRounds, nextCourtCount = courtCount, persist = true) {
     const rounds = Math.max(1, Number(nextRounds) || 1);
     const courts = Math.max(1, Number(nextCourtCount) || 1);
     setRoundCount(rounds);
+    if (persist) {
+      setFixtureForm({
+        ...fixtureForm,
+        planner_rounds: rounds,
+      });
+    }
     setGrid((current) => Array.from({ length: rounds }, (_, roundIndex) =>
       Array.from({ length: courts }, (_, courtIndex) => current[roundIndex]?.[courtIndex] || { pair_one_id: "", pair_two_id: "" })
     ));
@@ -4598,8 +4636,10 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
       ...fixtureForm,
       court_count: nextCourts.length,
       courts: nextCourts.join(", "),
+      planner_courts: nextCourts.join(", "),
+      planner_rounds: roundCount,
     });
-    resize(roundCount, nextCourts.length);
+    resize(roundCount, nextCourts.length, false);
   }
 
   function updateSlot(roundIndex, courtIndex, patch) {
@@ -4649,6 +4689,8 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
       ...fixtureForm,
       court_count: courtCount,
       courts: normalizedCourts.join(", "),
+      planner_courts: normalizedCourts.join(", "),
+      planner_rounds: nextRounds,
     });
     setGrid(buildEmptyPlannerGrid(nextRounds, courtCount).map((round, roundIndex) =>
       round.map((slot, courtIndex) => flatMatches[(roundIndex * courtCount) + courtIndex] || slot)
@@ -4685,7 +4727,13 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
         <div className="planner-toolbar">
           <label>
             Categoría
-            <select value={activeCategory} onChange={(event) => setCategory(event.target.value)}>
+            <select
+              value={activeCategory}
+              onChange={(event) => {
+                setCategory(event.target.value);
+                setFixtureForm({ ...fixtureForm, planner_category: event.target.value });
+              }}
+            >
               {categories.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
@@ -4711,7 +4759,14 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
             />
           </label>
           <label className="planner-check">
-            <input type="checkbox" checked={replaceUnplayed} onChange={(event) => setReplaceUnplayed(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={replaceUnplayed}
+              onChange={(event) => {
+                setReplaceUnplayed(event.target.checked);
+                setFixtureForm({ ...fixtureForm, planner_replace_unplayed: event.target.checked });
+              }}
+            />
             <span>Reemplazar sin resultado</span>
           </label>
           <button type="button" className="secondary-action" onClick={fillRoundRobin} disabled={categoryPairs.length < 2}>

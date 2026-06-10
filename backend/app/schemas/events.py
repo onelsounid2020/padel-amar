@@ -22,6 +22,7 @@ class EventBase(BaseModel):
     tournament_type: str
     category_configs: list[dict] = Field(default_factory=list)
     ranking_config: dict = Field(default_factory=dict)
+    fixture_config: dict = Field(default_factory=dict)
     description: str | None = None
     status: EventStatus = EventStatus.registration_open
     is_active: bool = True
@@ -42,6 +43,7 @@ class EventUpdate(BaseModel):
     tournament_type: str | None = None
     category_configs: list[dict] | None = None
     ranking_config: dict | None = None
+    fixture_config: dict | None = None
     description: str | None = None
     status: EventStatus | None = None
     is_active: bool | None = None

@@ -35,6 +35,8 @@ def ensure_local_schema() -> None:
             connection.execute(text("ALTER TABLE events ADD COLUMN category_configs JSON DEFAULT '[]'"))
         if "ranking_config" not in columns:
             connection.execute(text("ALTER TABLE events ADD COLUMN ranking_config JSON DEFAULT '{}'"))
+        if "fixture_config" not in columns:
+            connection.execute(text("ALTER TABLE events ADD COLUMN fixture_config JSON DEFAULT '{}'"))
         if "status" not in columns:
             connection.execute(text("ALTER TABLE events ADD COLUMN status VARCHAR(19) NOT NULL DEFAULT 'registration_open'"))
         if "users" in table_names:
