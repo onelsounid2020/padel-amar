@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw } from "lucide-react";
+import { Check, RefreshCw, RotateCcw } from "lucide-react";
 
 import { api } from "../api/client";
 import { pairName } from "../lib/pairs";
@@ -52,6 +52,31 @@ function normalizeScore(value) {
   return value === null || value === undefined ? "" : String(value);
 }
 
+const padelScorePresets = [
+  [6, 0],
+  [6, 1],
+  [6, 2],
+  [6, 3],
+  [6, 4],
+  [7, 5],
+  [7, 6],
+];
+
+function scoreState(current) {
+  const one = current?.pair_one_score;
+  const two = current?.pair_two_score;
+  if (one === "" || two === "" || one === undefined || two === undefined) {
+    return { tone: "pending", label: "Sin marcador" };
+  }
+  const left = Number(one);
+  const right = Number(two);
+  if (Number.isNaN(left) || Number.isNaN(right)) return { tone: "warning", label: "Revisa números" };
+  if (left === right) return { tone: "warning", label: "Empate" };
+  if (Math.max(left, right) > 9) return { tone: "warning", label: "Marcador alto" };
+  if (Math.max(left, right) < 6) return { tone: "warning", label: "Marcador corto" };
+  return { tone: "ok", label: left > right ? "Gana pareja 1" : "Gana pareja 2" };
+}
+
 export function TabletResults({
   events,
   pairs,
@@ -69,6 +94,8 @@ export function TabletResults({
   const [turnFilter, setTurnFilter] = useState("next");
   const [statusFilter, setStatusFilter] = useState("pending");
   const [scores, setScores] = useState({});
+  const [winnerSide, setWinnerSide] = useState({});
+  const [confirmingMatchId, setConfirmingMatchId] = useState(null);
 
   const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
   const matchRows = useMemo(() => matches
@@ -147,11 +174,35 @@ export function TabletResults({
         [field]: String(numericValue),
       },
     }));
+    setConfirmingMatchId(null);
   }
 
   function bumpScore(matchId, field, amount) {
     const currentValue = Number(scores[matchId]?.[field] || 0);
     setScore(matchId, field, currentValue + amount);
+  }
+
+  function applyPreset(matchId, winner, winnerScore, loserScore) {
+    setWinnerSide((current) => ({ ...current, [matchId]: winner }));
+    setScores((current) => ({
+      ...current,
+      [matchId]: {
+        pair_one_score: String(winner === "one" ? winnerScore : loserScore),
+        pair_two_score: String(winner === "two" ? winnerScore : loserScore),
+      },
+    }));
+    setConfirmingMatchId(null);
+  }
+
+  function resetMatchScore(row) {
+    setScores((current) => ({
+      ...current,
+      [row.match.id]: {
+        pair_one_score: normalizeScore(row.match.pair_one_score),
+        pair_two_score: normalizeScore(row.match.pair_two_score),
+      },
+    }));
+    setConfirmingMatchId(null);
   }
 
   function saveMatch(matchId) {
@@ -205,6 +256,9 @@ export function TabletResults({
           const canSave = selectedEventId && current.pair_one_score !== "" && current.pair_two_score !== "";
           const isDirty = normalizeScore(current.pair_one_score) !== normalizeScore(row.match.pair_one_score)
             || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
+          const state = scoreState(current);
+          const selectedWinner = winnerSide[row.match.id] || (Number(current.pair_two_score || 0) > Number(current.pair_one_score || 0) ? "two" : "one");
+          const isConfirming = confirmingMatchId === row.match.id;
           return (
             <article className={`tablet-match ${row.done ? "done" : ""} ${isDirty ? "dirty" : ""}`} key={row.match.id}>
               <div className="tablet-match-head">
@@ -212,38 +266,89 @@ export function TabletResults({
                 <strong>{row.courtLabel}</strong>
                 <em>{row.category}{row.group ? ` · ${row.group}` : ""}</em>
               </div>
-              <div className="tablet-score-row">
-                <strong>{row.pairOne}</strong>
-                <div className="tablet-score-control">
-                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_one_score", -1)}>-</button>
-                  <input
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    value={current.pair_one_score}
-                    onChange={(event) => setScore(row.match.id, "pair_one_score", event.target.value)}
-                  />
-                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_one_score", 1)}>+</button>
+              <div className="tablet-scoreboard">
+                <div className={`tablet-team ${Number(current.pair_one_score || 0) > Number(current.pair_two_score || 0) ? "leading" : ""}`}>
+                  <strong>{row.pairOne}</strong>
+                  <div className="tablet-score-control">
+                    <button type="button" aria-label="Restar punto pareja 1" onClick={() => bumpScore(row.match.id, "pair_one_score", -1)}>-</button>
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={current.pair_one_score}
+                      onChange={(event) => setScore(row.match.id, "pair_one_score", event.target.value)}
+                    />
+                    <button type="button" aria-label="Sumar punto pareja 1" onClick={() => bumpScore(row.match.id, "pair_one_score", 1)}>+</button>
+                  </div>
+                </div>
+                <div className="tablet-score-divider">
+                  <span>{current.pair_one_score || 0}</span>
+                  <em>-</em>
+                  <span>{current.pair_two_score || 0}</span>
+                </div>
+                <div className={`tablet-team ${Number(current.pair_two_score || 0) > Number(current.pair_one_score || 0) ? "leading" : ""}`}>
+                  <strong>{row.pairTwo}</strong>
+                  <div className="tablet-score-control">
+                    <button type="button" aria-label="Restar punto pareja 2" onClick={() => bumpScore(row.match.id, "pair_two_score", -1)}>-</button>
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={current.pair_two_score}
+                      onChange={(event) => setScore(row.match.id, "pair_two_score", event.target.value)}
+                    />
+                    <button type="button" aria-label="Sumar punto pareja 2" onClick={() => bumpScore(row.match.id, "pair_two_score", 1)}>+</button>
+                  </div>
                 </div>
               </div>
-              <div className="tablet-versus">vs</div>
-              <div className="tablet-score-row">
-                <strong>{row.pairTwo}</strong>
-                <div className="tablet-score-control">
-                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_two_score", -1)}>-</button>
-                  <input
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    value={current.pair_two_score}
-                    onChange={(event) => setScore(row.match.id, "pair_two_score", event.target.value)}
-                  />
-                  <button type="button" onClick={() => bumpScore(row.match.id, "pair_two_score", 1)}>+</button>
-                </div>
+              <div className="tablet-winner-toggle" aria-label="Ganador para marcadores rápidos">
+                <button
+                  type="button"
+                  className={selectedWinner === "one" ? "active" : ""}
+                  onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "one" }))}
+                >
+                  Gana 1
+                </button>
+                <button
+                  type="button"
+                  className={selectedWinner === "two" ? "active" : ""}
+                  onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "two" }))}
+                >
+                  Gana 2
+                </button>
               </div>
-              <button className="tablet-save" type="button" disabled={!canSave || loading} onClick={() => saveMatch(row.match.id)}>
-                <Check size={16} /> {isDirty ? "Guardar" : row.done ? "OK" : "Guardar"}
-              </button>
+              <div className="tablet-presets" aria-label="Marcadores rápidos">
+                {padelScorePresets.map(([winnerScore, loserScore]) => (
+                  <button
+                    type="button"
+                    key={`${winnerScore}-${loserScore}`}
+                    onClick={() => applyPreset(row.match.id, selectedWinner, winnerScore, loserScore)}
+                  >
+                    {selectedWinner === "one" ? `${winnerScore}-${loserScore}` : `${loserScore}-${winnerScore}`}
+                  </button>
+                ))}
+              </div>
+              <div className={`tablet-score-state ${state.tone}`}>
+                <span>{state.label}</span>
+                {isDirty && (
+                  <button type="button" onClick={() => resetMatchScore(row)} title="Deshacer cambios">
+                    <RotateCcw size={14} /> Deshacer
+                  </button>
+                )}
+              </div>
+              {isConfirming ? (
+                <div className="tablet-confirm-save">
+                  <span>Confirmar {current.pair_one_score || 0}-{current.pair_two_score || 0}</span>
+                  <button type="button" className="secondary-action" onClick={() => setConfirmingMatchId(null)}>Cancelar</button>
+                  <button type="button" disabled={!canSave || loading} onClick={() => saveMatch(row.match.id)}>
+                    <Check size={16} /> Confirmar
+                  </button>
+                </div>
+              ) : (
+                <button className="tablet-save" type="button" disabled={!canSave || loading} onClick={() => setConfirmingMatchId(row.match.id)}>
+                  <Check size={16} /> {isDirty ? "Guardar" : row.done ? "Confirmar edición" : "Guardar"}
+                </button>
+              )}
             </article>
           );
         }) : (
