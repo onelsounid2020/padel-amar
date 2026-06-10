@@ -8,7 +8,6 @@ import {
   CreditCard,
   ExternalLink,
   FileCheck2,
-  Grid2X2,
   Check,
   ListChecks,
   Medal,
@@ -4575,6 +4574,39 @@ function balancedBattleGrid(pairs, roundCount, courtCount) {
   return rounds;
 }
 
+function groupedRoundRobinPlannerGrid(pairs, assignments, labels, targetCourtCount) {
+  const groupPlans = labels
+    .map((label) => ({
+      label,
+      rounds: roundRobinMatches(
+        pairs
+          .filter((pair) => getPlannerGroup(assignments, pair.id) === label)
+          .map((pair) => pair.id)
+      ),
+    }))
+    .filter((plan) => plan.rounds.length);
+
+  const requiredRounds = Math.max(1, ...groupPlans.map((plan) => plan.rounds.length));
+  const rounds = Array.from({ length: requiredRounds }, () => []);
+
+  groupPlans.forEach((plan) => {
+    plan.rounds.forEach((groupRound, roundIndex) => {
+      groupRound.forEach((slot) => rounds[roundIndex].push(slot));
+    });
+  });
+
+  const requiredCourtCount = Math.max(1, Number(targetCourtCount || 0), ...rounds.map((round) => round.length));
+  return {
+    grid: rounds.map((round) => Array.from(
+      { length: requiredCourtCount },
+      (_, courtIndex) => round[courtIndex] || { pair_one_id: "", pair_two_id: "" }
+    )),
+    plannedCount: rounds.reduce((sum, round) => sum + round.length, 0),
+    requiredCourtCount,
+    requiredRounds,
+  };
+}
+
 function parseCourtList(value) {
   const courts = String(value || "")
     .split(",")
@@ -4756,12 +4788,12 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     ),
   };
   const groupLabels = plannerGroupLabels(groupCount);
-  const activeRoundRobin = roundRobinMatches(categoryPairs.map((pair) => pair.id));
+  const groupedFixturePreview = groupedRoundRobinPlannerGrid(categoryPairs, groupAssignments, groupLabels, 0);
   const activePlan = {
     pairs: categoryPairs.length,
-    rounds: activeRoundRobin.length,
-    matches: (categoryPairs.length * Math.max(categoryPairs.length - 1, 0)) / 2,
-    courts: activeRoundRobin.length ? Math.max(...activeRoundRobin.map((round) => round.length), 0) : 0,
+    rounds: groupedFixturePreview.requiredRounds,
+    matches: groupedFixturePreview.plannedCount,
+    courts: groupedFixturePreview.requiredCourtCount,
   };
   const plannerStartTime = startTime || fixtureForm.start_time || "10:30";
   const validation = validatePlanner(grid, pairs, matches, {
@@ -4822,6 +4854,15 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
 
   function distributeGroups() {
     persistGroupAssignments(balancedGroupAssignments(categoryPairs, groupCount));
+  }
+
+  function ensureCourtListSize(courts, size) {
+    const nextCourts = [...courts];
+    for (let index = 1; nextCourts.length < size; index += 1) {
+      const courtName = String(index);
+      if (!nextCourts.includes(courtName)) nextCourts.push(courtName);
+    }
+    return nextCourts;
   }
 
   function resize(nextRounds, nextCourtCount = courtCount, persist = true) {
@@ -4918,6 +4959,30 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     setGrid(balancedBattleGrid(categoryPairs, roundCount, courtCount));
   }
 
+  function fillGroupedFixture() {
+    const plan = groupedRoundRobinPlannerGrid(categoryPairs, groupAssignments, groupLabels, courtCount);
+    if (!plan.plannedCount) return;
+    const nextCourts = ensureCourtListSize(normalizedCourts, plan.requiredCourtCount);
+    setRoundCount(plan.requiredRounds);
+    setCourtInput(nextCourts.join(", "));
+    setFixtureForm({
+      ...fixtureForm,
+      court_count: nextCourts.length,
+      courts: nextCourts.join(", "),
+      planner_courts: nextCourts.join(", "),
+      planner_rounds: plan.requiredRounds,
+      planner_group_count: groupCount,
+      planner_group_assignments: {
+        ...(fixtureForm.planner_group_assignments || {}),
+        [activeCategory]: groupAssignments,
+      },
+    });
+    setGrid(plan.grid.map((round) => Array.from(
+      { length: nextCourts.length },
+      (_, courtIndex) => round[courtIndex] || { pair_one_id: "", pair_two_id: "" }
+    )));
+  }
+
   function clearGrid() {
     setGrid(buildEmptyPlannerGrid(roundCount, courtCount));
   }
@@ -4935,6 +5000,9 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   }
 
   const canSave = eventId && validation.plannedCount > 0 && validation.issues.length === 0;
+  const canBuildGroupedFixture = categoryPairs.length >= 2 && groupLabels.some((label) =>
+    categoryPairs.filter((pair) => getPlannerGroup(groupAssignments, pair.id) === label).length >= 2
+  );
 
   return (
     <details className="manual-planner" open={!matches.length}>
@@ -5023,6 +5091,9 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
             </label>
             <button type="button" className="secondary-action" onClick={distributeGroups} disabled={categoryPairs.length < 2}>
               Distribuir grupos
+            </button>
+            <button type="button" onClick={fillGroupedFixture} disabled={!canBuildGroupedFixture}>
+              <Swords size={16} /> Armar fixture
             </button>
           </div>
           <div className="planner-group-grid">
