@@ -209,6 +209,49 @@ function mergePlayersFromPairs(players, pairs) {
   return [...byIdentity.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function participantOptionKey(option) {
+  if (!option) return "";
+  if (option.kind === "member") return `member:${option.id}`;
+  return `player:${option.id}`;
+}
+
+function mergeParticipantOptions(players, pairs, members) {
+  const byIdentity = new Map();
+  mergePlayersFromPairs(players, pairs).forEach((player) => {
+    byIdentity.set(playerIdentityKey(player), { ...player, kind: "player", value: `player:${player.id}` });
+  });
+  members.forEach((member) => {
+    const key = member.id ? `user:${member.id}` : member.email ? `email:${String(member.email).trim().toLowerCase()}` : "";
+    if (!key || byIdentity.has(key)) return;
+    byIdentity.set(key, {
+      ...member,
+      kind: "member",
+      value: `member:${member.id}`,
+      user_id: member.id,
+      category: member.category || "5ta",
+      preferred_side: member.preferred_side || "indiferente",
+    });
+  });
+  return [...byIdentity.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function resolveParticipantPlayerId(value, options, category) {
+  if (!value) return null;
+  if (String(value).startsWith("player:")) return Number(String(value).replace("player:", ""));
+  if (!String(value).startsWith("member:")) return Number(value);
+  const option = options.find((item) => item.value === value);
+  if (!option) return null;
+  const created = await api.createPlayer({
+    user_id: option.id,
+    name: option.name,
+    email: option.email || null,
+    phone: option.phone || null,
+    category: category || option.category || "5ta",
+    preferred_side: option.preferred_side || "indiferente",
+  });
+  return created.id;
+}
+
 function pageFromLocation() {
   if (typeof window === "undefined") return "events";
   const view = new URLSearchParams(window.location.search).get("view");
@@ -581,10 +624,15 @@ function App() {
   async function submitPair(event) {
     event.preventDefault();
     await run(async () => {
+      const participantOptions = mergeParticipantOptions(players, pairs, members);
+      const playerOneId = await resolveParticipantPlayerId(pairForm.player_one_id, participantOptions, pairForm.category);
+      const playerTwoId = pairForm.player_two_id
+        ? await resolveParticipantPlayerId(pairForm.player_two_id, participantOptions, pairForm.category)
+        : null;
       await api.createPair(selectedEventId, {
         ...pairForm,
-        player_one_id: Number(pairForm.player_one_id),
-        player_two_id: pairForm.player_two_id ? Number(pairForm.player_two_id) : null,
+        player_one_id: playerOneId,
+        player_two_id: playerTwoId,
         skill_level: Number(pairForm.skill_level || 5),
       });
       setPairForm({ player_one_id: "", player_two_id: "", category: "", skill_level: 5, status: "buscando_partner" });
@@ -1081,6 +1129,7 @@ function App() {
     canAccess("events") ? <EventsPage
       events={events}
       players={players}
+      members={members}
       pairs={pairs}
       payments={payments}
       registrations={registrations}
@@ -2240,6 +2289,7 @@ function EventsPage(props) {
   const {
     events,
     players,
+    members,
     pairs,
     payments,
     registrations,
@@ -2301,6 +2351,7 @@ function EventsPage(props) {
   const recommendedCourtsWithFinals = estimatedMatchesWithFinals ? Math.ceil(estimatedMatchesWithFinals / slotsPerCourt) : 0;
   const configuredCourts = Number(fixtureForm.court_count || 0);
   const playerOptions = mergePlayersFromPairs(players, pairs);
+  const participantOptions = mergeParticipantOptions(players, pairs, members || []);
 
   function startNewEvent() {
     setSelectedEventId("");
@@ -2468,11 +2519,13 @@ function EventsPage(props) {
                 <form onSubmit={submitPair} className="compact-form">
                   <select value={pairForm.player_one_id} onChange={(e) => setPairForm({ ...pairForm, player_one_id: e.target.value })} required>
                     <option value="">Jugador 1</option>
-                    {playerOptions.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                    {participantOptions.map((option) => <option key={option.value} value={option.value}>{option.name}{option.kind === "member" ? " · cuenta" : ""}</option>)}
                   </select>
                   <select value={pairForm.player_two_id} onChange={(e) => setPairForm({ ...pairForm, player_two_id: e.target.value })}>
                     <option value="">Jugador 2 opcional</option>
-                    {playerOptions.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                    {participantOptions
+                      .filter((option) => option.value !== pairForm.player_one_id)
+                      .map((option) => <option key={option.value} value={option.value}>{option.name}{option.kind === "member" ? " · cuenta" : ""}</option>)}
                   </select>
                   <CategorySelect value={pairForm.category} onChange={(value) => setPairForm({ ...pairForm, category: value })} />
                   <input
@@ -2494,7 +2547,7 @@ function EventsPage(props) {
             </div>
 
             <div className="data-grid">
-                  <PairsBlock pairs={pairs} players={playerOptions} eventId={selectedEventId} onChange={run} confirmAction={confirmAction} />
+                  <PairsBlock pairs={pairs} participantOptions={participantOptions} eventId={selectedEventId} onChange={run} confirmAction={confirmAction} />
             </div>
 
             </>
@@ -3941,7 +3994,7 @@ function DataBlock({ title, rows }) {
   );
 }
 
-function PairsBlock({ pairs, players, eventId, onChange, confirmAction }) {
+function PairsBlock({ pairs, participantOptions, eventId, onChange, confirmAction }) {
   const completePairs = pairs.filter((pair) => pair.status === "completa");
   const searchingPairs = pairs.filter((pair) => pair.status === "buscando_partner");
   const waitlistPairs = pairs.filter((pair) => pair.status === "lista_espera");
@@ -3970,27 +4023,42 @@ function PairsBlock({ pairs, players, eventId, onChange, confirmAction }) {
                 {sectionPairs.map((pair) => (
                   <div className="pair-admin-row" key={pair.id}>
                     <select
-                      value={pair.player_one_id}
-                      onChange={(event) => onChange(() => api.updatePair(eventId, pair.id, {
-                        player_one_id: Number(event.target.value),
-                      }))}
+                      value={`player:${pair.player_one_id}`}
+                      onChange={(event) => onChange(async () => {
+                        const playerOneId = await resolveParticipantPlayerId(event.target.value, participantOptions, pair.category);
+                        await api.updatePair(eventId, pair.id, {
+                          player_one_id: playerOneId,
+                        });
+                      })}
                     >
-                      {players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                      {participantOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.name}{option.kind === "member" ? " · cuenta" : ""}
+                        </option>
+                      ))}
                     </select>
                     <select
-                      value={pair.player_two_id || ""}
+                      value={pair.player_two_id ? `player:${pair.player_two_id}` : ""}
                       onChange={(event) => {
-                        const playerTwoId = event.target.value ? Number(event.target.value) : null;
-                        onChange(() => api.updatePair(eventId, pair.id, {
-                          player_two_id: playerTwoId,
-                          status: playerTwoId ? "completa" : "buscando_partner",
-                        }));
+                        onChange(async () => {
+                          const playerTwoId = event.target.value
+                            ? await resolveParticipantPlayerId(event.target.value, participantOptions, pair.category)
+                            : null;
+                          await api.updatePair(eventId, pair.id, {
+                            player_two_id: playerTwoId,
+                            status: playerTwoId ? "completa" : "buscando_partner",
+                          });
+                        });
                       }}
                     >
                       <option value="">Sin partner</option>
-                      {players
-                        .filter((player) => player.id !== pair.player_one_id)
-                        .map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                      {participantOptions
+                        .filter((option) => option.value !== `player:${pair.player_one_id}`)
+                        .map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.name}{option.kind === "member" ? " · cuenta" : ""}
+                          </option>
+                        ))}
                     </select>
                     <CategorySelect
                       value={pair.category}

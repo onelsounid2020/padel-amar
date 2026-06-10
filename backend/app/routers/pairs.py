@@ -37,6 +37,9 @@ def create_pair(
         if not player_two:
             raise HTTPException(status_code=404, detail="Jugador 2 no encontrado")
     ensure_different_players(player_one, player_two)
+    _absorb_open_single_pair(db, event_id, player_one, exclude_pair_id=0)
+    if player_two:
+        _absorb_open_single_pair(db, event_id, player_two, exclude_pair_id=0)
     ensure_not_registered(db, event_id, player_one)
     if player_two:
         ensure_not_registered(db, event_id, player_two)
@@ -93,6 +96,9 @@ def update_pair(
     if next_player_two_id and not next_player_two:
         raise HTTPException(status_code=404, detail="Jugador 2 no encontrado")
     ensure_different_players(next_player_one, next_player_two)
+    _absorb_open_single_pair(db, event_id, next_player_one, exclude_pair_id=pair_id)
+    if next_player_two:
+        _absorb_open_single_pair(db, event_id, next_player_two, exclude_pair_id=pair_id)
     ensure_not_registered(db, event_id, next_player_one, exclude_pair_id=pair_id)
     if next_player_two:
         ensure_not_registered(db, event_id, next_player_two, exclude_pair_id=pair_id)
@@ -143,6 +149,35 @@ def _get_pair(db: Session, pair_id: int) -> EventPair:
     if not pair:
         raise HTTPException(status_code=404, detail="Pareja no encontrada")
     return pair
+
+
+def _absorb_open_single_pair(db: Session, event_id: int, player: Player, *, exclude_pair_id: int) -> None:
+    conflict = db.scalar(
+        select(EventPair)
+        .where(EventPair.event_id == event_id, EventPair.id != exclude_pair_id)
+        .where(or_(EventPair.player_one_id == player.id, EventPair.player_two_id == player.id))
+    )
+    if not conflict:
+        return
+    has_matches = db.scalar(
+        select(func.count(Match.id)).where(
+            Match.event_id == event_id,
+            or_(
+                Match.pair_one_id == conflict.id,
+                Match.pair_two_id == conflict.id,
+                Match.winner_pair_id == conflict.id,
+            ),
+        )
+    ) or 0
+    if (
+        conflict.status == PairStatus.buscando_partner
+        and conflict.player_one_id == player.id
+        and conflict.player_two_id is None
+        and has_matches == 0
+    ):
+        db.execute(delete(Standing).where(Standing.event_id == event_id, Standing.pair_id == conflict.id))
+        db.delete(conflict)
+        db.flush()
 
 
 def _can_see_pair_skill(db: Session, authorization: str | None) -> bool:

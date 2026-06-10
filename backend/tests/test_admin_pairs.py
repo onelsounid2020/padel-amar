@@ -5,9 +5,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Event, EventRegistration, PairStatus, Payment, Player, RegistrationStatus
-from app.routers.pairs import create_pair
-from app.schemas.players import PairCreate
+from app.models import Event, EventPair, EventRegistration, PairStatus, Payment, Player, RegistrationStatus
+from app.routers.pairs import create_pair, update_pair
+from app.schemas.players import PairCreate, PairUpdate
 
 
 class AdminPairsTest(unittest.TestCase):
@@ -83,6 +83,39 @@ class AdminPairsTest(unittest.TestCase):
         self.assertEqual({registration.status for registration in first_registrations}, {RegistrationStatus.confirmada})
         self.assertEqual({registration.status for registration in second_registrations}, {RegistrationStatus.lista_espera})
         self.assertEqual({registration.source for registration in first_registrations + second_registrations}, {"admin"})
+
+    def test_admin_can_merge_two_open_partner_searches(self) -> None:
+        self.event.capacity = 10
+        self.db.commit()
+        first = create_pair(
+            self.event.id,
+            PairCreate(
+                player_one_id=self.players[0].id,
+                category="5ta",
+                status=PairStatus.buscando_partner,
+            ),
+            self.db,
+        )
+        second = create_pair(
+            self.event.id,
+            PairCreate(
+                player_one_id=self.players[1].id,
+                category="5ta",
+                status=PairStatus.buscando_partner,
+            ),
+            self.db,
+        )
+
+        merged = update_pair(
+            self.event.id,
+            first.id,
+            PairUpdate(player_two_id=self.players[1].id, status=PairStatus.completa),
+            self.db,
+        )
+
+        self.assertEqual(merged.player_two_id, self.players[1].id)
+        self.assertEqual(merged.status, PairStatus.completa)
+        self.assertIsNone(self.db.get(EventPair, second.id))
 
 
 if __name__ == "__main__":
