@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, api, setAuthToken } from "./api/client";
-import { computeFourPairFinalPlans } from "./lib/fixtureFinals";
+import { computeFinalPlans } from "./lib/fixtureFinals";
 import { pairName } from "./lib/pairs";
 import { TabletResults } from "./pages/TabletResults";
 import "./styles.css";
@@ -656,9 +656,10 @@ function App() {
     await run(async () => {
       const courts = fixtureForm.courts.split(",").map((court) => court.trim()).filter(Boolean);
       const timing = deriveFixtureTiming(selectedEvent?.schedule || eventForm.schedule, Number(fixtureForm.warmup_minutes || 0));
-      await api.generateFixture(selectedEventId, Number(fixtureForm.guaranteed_matches), courts, {
+      const isGroupsWithFinals = fixtureForm.mode === "groups_finals";
+      await api.generateFixture(selectedEventId, isGroupsWithFinals ? 3 : Number(fixtureForm.guaranteed_matches), courts, {
         format: "groups",
-        groupSize: Number(fixtureForm.group_size || 4),
+        groupSize: isGroupsWithFinals ? 4 : Number(fixtureForm.group_size || 4),
         courtsPerGroup: 2,
         startTime: timing.fixtureStart || fixtureForm.start_time || "17:00",
         setMinutes: Number(fixtureForm.set_minutes || 22),
@@ -2587,8 +2588,17 @@ function EventsPage(props) {
                     <div className="fixture-controls">
                       <label className="wide-field">
                         Modalidad
-                        <select value={fixtureForm.mode} onChange={(e) => setFixtureForm({ ...fixtureForm, mode: e.target.value })}>
+                        <select
+                          value={fixtureForm.mode}
+                          onChange={(e) => setFixtureForm({
+                            ...fixtureForm,
+                            mode: e.target.value,
+                            group_size: e.target.value === "groups_finals" ? 4 : fixtureForm.group_size,
+                            guaranteed_matches: e.target.value === "groups_finals" ? 3 : fixtureForm.guaranteed_matches,
+                          })}
+                        >
                           <option value="groups">Todos contra todos por grupos</option>
+                          <option value="groups_finals">2 grupos + finales</option>
                           <option value="bracket">Torneo desde ranking</option>
                         </select>
                       </label>
@@ -2654,9 +2664,9 @@ function EventsPage(props) {
                         </span>
                         <small>Sin finales: {recommendedCourts || 0} cancha(s). Para cada categoría se estima final y partido por 3er lugar.</small>
                       </div>
-                      {fixtureForm.mode === "groups" ? (
+                      {fixtureForm.mode === "groups" || fixtureForm.mode === "groups_finals" ? (
                         <button className="secondary-action wide-field" type="button" onClick={submitGenerateFixture} disabled={!selectedEventId}>
-                          <Swords size={16} /> Generar todo el evento
+                          <Swords size={16} /> {fixtureForm.mode === "groups_finals" ? "Generar grupos + finales" : "Generar todo el evento"}
                         </button>
                       ) : (
                         <button className="secondary-action wide-field" type="button" onClick={submitGenerateBracket} disabled={!selectedEventId}>
@@ -5123,7 +5133,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
 
 function DynamicFourPairFinals({ matches, pairs, standings, eventId, fixtureForm, onChange }) {
   const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
-  const plans = computeFourPairFinalPlans({ pairs, matches, standings, fixtureConfig: fixtureForm });
+  const plans = computeFinalPlans({ pairs, matches, standings, fixtureConfig: fixtureForm });
 
   if (!plans.length) return null;
 
@@ -5138,17 +5148,60 @@ function DynamicFourPairFinals({ matches, pairs, standings, eventId, fixtureForm
         <span>Ronda 4 y 5 por ranking</span>
       </div>
       {plans.map((plan) => {
-        const missingSemis = plan.semis;
+        const missingSemis = plan.semis || [];
         const missingFinals = plan.finals;
+        const placementMatches = plan.placementMatches || [];
         const canCreateSemis = eventId && plan.allGroupResults && missingSemis.length > 0;
         const canCreateFinals = eventId && plan.existingSemiOne && plan.existingSemiTwo && hasResult(plan.existingSemiOne) && hasResult(plan.existingSemiTwo) && missingFinals.length > 0;
+        const canCreatePlacements = eventId && plan.allGroupResults && placementMatches.length > 0;
         return (
           <section className="dynamic-category-plan" key={plan.category}>
             <div className="fixture-turn-title">
               <strong>{plan.category}</strong>
               <span>{plan.allGroupResults ? "ranking listo" : `${plan.finishedGroupMatches}/${plan.totalGroupMatches} resultados fase`}</span>
             </div>
-            <div className="qualifier-grid">
+            {plan.type === "placements" ? (
+              <>
+                <div className="qualifier-grid">
+                  {plan.groupPlans.map((group) => (
+                    <div className="qualifier-card" key={group.groupName}>
+                      <span>{group.groupName}</span>
+                      <strong>{group.finishedMatches}/{group.totalMatches} resultados</strong>
+                      <ol>
+                        {group.standings.map((standing, index) => (
+                          <li key={standing.pair.id}>
+                            {index + 1}. {pairName(standing.pair)} <b>{standing.points}</b>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ))}
+                  <div className="dynamic-court-card">
+                    <span>Ronda 4 · {plan.placementTime}</span>
+                    <strong>Finales por posición</strong>
+                    {(placementMatches.length ? placementMatches : [
+                      { round_name: "Final", pair_one_id: null, pair_two_id: null },
+                      { round_name: "3er lugar", pair_one_id: null, pair_two_id: null },
+                      { round_name: "5to lugar", pair_one_id: null, pair_two_id: null },
+                      { round_name: "7mo lugar", pair_one_id: null, pair_two_id: null },
+                    ]).map((match, index) => (
+                      <p key={`${plan.category}-placement-${index}`}>
+                        {match.pair_one_id && match.pair_two_id
+                          ? `${pairName(pairById.get(match.pair_one_id))} vs ${pairName(pairById.get(match.pair_two_id))}`
+                          : match.round_name}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+                <div className="dynamic-actions">
+                  <button type="button" className="secondary-action" disabled={!canCreatePlacements} onClick={() => createMatches(placementMatches)}>
+                    Crear ronda 4 posiciones
+                  </button>
+                </div>
+              </>
+            ) : (
+            <>
+              <div className="qualifier-grid">
               <div className="qualifier-card">
                 <span>Tabla tras ronda 3</span>
                 <strong>{plan.allGroupResults ? "Definida" : "Pendiente"}</strong>
@@ -5182,6 +5235,8 @@ function DynamicFourPairFinals({ matches, pairs, standings, eventId, fixtureForm
                 Crear ronda 5
               </button>
             </div>
+            </>
+            )}
           </section>
         );
       })}

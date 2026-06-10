@@ -164,3 +164,141 @@ export function computeFourPairFinalPlans({ pairs, matches, standings, fixtureCo
       };
     });
 }
+
+function emptyGroupStanding(pair) {
+  return {
+    pair,
+    played: 0,
+    won: 0,
+    points: 0,
+    pointsFor: 0,
+    pointsAgainst: 0,
+  };
+}
+
+function standingDiff(standing) {
+  return standing.pointsFor - standing.pointsAgainst;
+}
+
+function sortGroupStandings(items) {
+  return [...items].sort((a, b) => (
+    b.points - a.points
+    || b.won - a.won
+    || standingDiff(b) - standingDiff(a)
+    || b.pointsFor - a.pointsFor
+    || (a.pair.seed || 9999) - (b.pair.seed || 9999)
+    || a.pair.id - b.pair.id
+  ));
+}
+
+export function computeGroupPlacementFinalPlans({ pairs, matches, fixtureConfig = {} }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const setMinutes = Number(fixtureConfig.set_minutes || 20);
+  const fallbackStart = fixtureConfig.start_time || "21:10";
+  const matchRows = matches.map((match) => {
+    const schedule = parseFixtureRound(match.round_name);
+    const pairOne = pairById.get(match.pair_one_id);
+    const pairTwo = pairById.get(match.pair_two_id);
+    const category = fixtureCategoryFromPairs(pairOne, pairTwo, schedule.category);
+    return { match, schedule, pairOne, pairTwo, category, done: hasResult(match) };
+  });
+  const categories = categoryPairGroups(pairs);
+
+  return Object.entries(categories)
+    .filter(([, categoryPairs]) => categoryPairs.length === 8)
+    .map(([category]) => {
+      const categoryRows = matchRows.filter((row) => row.category === category);
+      const groupRows = categoryRows.filter((row) => /^Grupo\s+/i.test(row.schedule.group || ""));
+      const groups = groupRows.reduce((collection, row) => {
+        const groupName = row.schedule.group;
+        collection[groupName] = [...(collection[groupName] || []), row];
+        return collection;
+      }, {});
+      const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 2);
+      if (groupNames.length < 2) return null;
+
+      const groupPlans = groupNames.map((groupName) => {
+        const rows = groups[groupName];
+        const standingsMap = new Map();
+        rows.forEach((row) => {
+          [row.pairOne, row.pairTwo].filter(Boolean).forEach((pair) => {
+            if (!standingsMap.has(pair.id)) standingsMap.set(pair.id, emptyGroupStanding(pair));
+          });
+        });
+        rows.forEach((row) => {
+          if (!hasResult(row.match)) return;
+          const one = standingsMap.get(row.match.pair_one_id);
+          const two = standingsMap.get(row.match.pair_two_id);
+          if (!one || !two) return;
+          const oneScore = Number(row.match.pair_one_score);
+          const twoScore = Number(row.match.pair_two_score);
+          one.played += 1;
+          two.played += 1;
+          one.pointsFor += oneScore;
+          one.pointsAgainst += twoScore;
+          two.pointsFor += twoScore;
+          two.pointsAgainst += oneScore;
+          if (oneScore > twoScore) {
+            one.won += 1;
+            one.points += 3;
+          } else if (twoScore > oneScore) {
+            two.won += 1;
+            two.points += 3;
+          } else {
+            one.points += 1;
+            two.points += 1;
+          }
+        });
+        return {
+          groupName,
+          rows,
+          standings: sortGroupStandings([...standingsMap.values()]),
+          totalMatches: 6,
+          finishedMatches: rows.filter((row) => row.done).length,
+        };
+      });
+      const groupsReady = groupPlans.every((group) => group.rows.length >= group.totalMatches && group.finishedMatches >= group.totalMatches && group.standings.length >= 4);
+      const groupEndTimes = groupRows.map((row) => slotEndMinutes(row.schedule.time || row.schedule.turn)).filter(Boolean);
+      const latestEnd = groupEndTimes.length ? Math.max(...groupEndTimes) : minutesFromSlot(fallbackStart);
+      const placementTime = playoffSlotLabel(latestEnd, setMinutes, 0);
+      const courts = [...new Set(groupRows.map((row) => row.match.court).filter(Boolean))]
+        .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+      const labels = ["Final", "3er lugar", "5to lugar", "7mo lugar"];
+      const existingByLabel = Object.fromEntries(labels.map((label) => [
+        label,
+        categoryRows.find((row) => new RegExp(label, "i").test(row.match.round_name || ""))?.match,
+      ]));
+      const placementMatches = groupsReady ? labels.map((label, index) => {
+        if (existingByLabel[label]) return null;
+        const left = groupPlans[0].standings[index]?.pair;
+        const right = groupPlans[1].standings[index]?.pair;
+        if (!left || !right) return null;
+        return {
+          pair_one_id: left.id,
+          pair_two_id: right.id,
+          round_name: `${category} - Fase final - Ronda 4 ${label} - ${placementTime}`,
+          court: courts[index] || courts[0] || String(index + 1),
+        };
+      }).filter(Boolean) : [];
+
+      return {
+        type: "placements",
+        category,
+        groupPlans,
+        finishedGroupMatches: groupPlans.reduce((sum, group) => sum + group.finishedMatches, 0),
+        totalGroupMatches: groupPlans.reduce((sum, group) => sum + group.totalMatches, 0),
+        groupReady: groupsReady,
+        allGroupResults: groupsReady,
+        placementTime,
+        placementMatches,
+      };
+    })
+    .filter(Boolean);
+}
+
+export function computeFinalPlans(options) {
+  return [
+    ...computeFourPairFinalPlans(options).map((plan) => ({ ...plan, type: "semis" })),
+    ...computeGroupPlacementFinalPlans(options),
+  ];
+}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, RotateCcw, Trophy } from "lucide-react";
 
 import { api } from "../api/client";
-import { computeFourPairFinalPlans } from "../lib/fixtureFinals";
+import { computeFinalPlans } from "../lib/fixtureFinals";
 import { pairName } from "../lib/pairs";
 
 function parseFixtureRound(roundName) {
@@ -148,7 +148,7 @@ export function TabletResults({
   }, {});
   const dynamicFinalPlans = useMemo(() => {
     const fixtureConfig = selectedEvent?.fixture_config || {};
-    return computeFourPairFinalPlans({ pairs, matches, standings, fixtureConfig });
+    return computeFinalPlans({ pairs, matches, standings, fixtureConfig });
   }, [pairs, matches, standings, selectedEvent?.fixture_config]);
 
   const visibleRows = matchRows.filter((row) => (
@@ -276,17 +276,23 @@ export function TabletResults({
                 <span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span>
               </div>
               <p>
-                {plan.semis.length
+                {plan.type === "placements" && plan.placementMatches?.length
+                  ? "Final, 3er, 5to y 7mo lugar listos"
+                  : plan.semis?.length
                   ? `${plan.standingsRows[0]?.pair ? pairName(plan.standingsRows[0].pair) : "1"} vs ${plan.standingsRows[3]?.pair ? pairName(plan.standingsRows[3].pair) : "4"} · ${plan.standingsRows[1]?.pair ? pairName(plan.standingsRows[1].pair) : "2"} vs ${plan.standingsRows[2]?.pair ? pairName(plan.standingsRows[2].pair) : "3"}`
-                  : plan.finals.length
+                  : plan.finals?.length
                     ? "Final y 3er lugar listos"
                     : "Esperando resultados"}
               </p>
               <div className="tablet-dynamic-actions">
-                <button type="button" disabled={!plan.semis.length || loading} onClick={() => createDynamicMatches(plan.semis)}>
+                <button
+                  type="button"
+                  disabled={!((plan.type === "placements" ? plan.placementMatches?.length : plan.semis?.length)) || loading}
+                  onClick={() => createDynamicMatches(plan.type === "placements" ? plan.placementMatches : plan.semis)}
+                >
                   Crear R4
                 </button>
-                <button type="button" disabled={!plan.finals.length || loading} onClick={() => createDynamicMatches(plan.finals)}>
+                <button type="button" disabled={!plan.finals?.length || loading} onClick={() => createDynamicMatches(plan.finals)}>
                   Crear R5
                 </button>
               </div>
