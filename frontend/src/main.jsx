@@ -169,6 +169,7 @@ const eventCategoryGroups = [
 ];
 
 const allPadelCategories = eventCategoryGroups.flatMap((group) => group.categories);
+const tabletAccessStorageKey = "amar_tablet_access_token";
 
 function categoryLabel(category) {
   return category;
@@ -442,23 +443,32 @@ function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const tabletAccessToken = pageFromLocation() === "tablet" ? params.get("access") : "";
-    if (tabletAccessToken) {
+    const isTabletPage = pageFromLocation() === "tablet";
+    const urlTabletAccessToken = isTabletPage ? params.get("access") : "";
+    const storedTabletAccessToken = isTabletPage ? localStorage.getItem(tabletAccessStorageKey) || "" : "";
+
+    async function loginTablet(accessToken, { remember = false } = {}) {
       setLoading(true);
-      api.tabletLogin(tabletAccessToken)
-        .then(async (response) => {
-          setAuthToken(response.access_token);
-          setAuthUser(response.user);
-          const permissions = await loadPermissions(response.user);
-          await loadBase(response.user, permissions);
-          await loadEventData(selectedEventId, response.user, permissions);
-          window.history.replaceState({}, "", "/tablet");
-        })
-        .catch((err) => {
-          setAuthToken("");
-          setError(err.message);
-        })
-        .finally(() => setLoading(false));
+      try {
+        const response = await api.tabletLogin(accessToken);
+        if (remember) localStorage.setItem(tabletAccessStorageKey, accessToken);
+        setAuthToken(response.access_token);
+        setAuthUser(response.user);
+        const permissions = await loadPermissions(response.user);
+        await loadBase(response.user, permissions);
+        await loadEventData(selectedEventId, response.user, permissions);
+        window.history.replaceState({}, "", "/tablet");
+      } catch (err) {
+        setAuthToken("");
+        if (isTabletPage) localStorage.removeItem(tabletAccessStorageKey);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (urlTabletAccessToken) {
+      loginTablet(urlTabletAccessToken, { remember: true });
       return;
     }
 
@@ -469,7 +479,12 @@ function App() {
         await loadBase(user, permissions);
         await loadEventData(selectedEventId, user, permissions);
       })
-      .catch(() => setAuthToken(""));
+      .catch(() => {
+        setAuthToken("");
+        if (storedTabletAccessToken) {
+          loginTablet(storedTabletAccessToken);
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -873,6 +888,7 @@ function App() {
 
   function logout() {
     setAuthToken("");
+    localStorage.removeItem(tabletAccessStorageKey);
     setAuthUser(null);
     setPlayers([]);
     setPayments([]);
