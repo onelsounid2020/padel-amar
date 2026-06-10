@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, RotateCcw } from "lucide-react";
+import { Check, RefreshCw, RotateCcw, Trophy } from "lucide-react";
 
 import { api } from "../api/client";
+import { computeFourPairFinalPlans } from "../lib/fixtureFinals";
 import { pairName } from "../lib/pairs";
 
 function parseFixtureRound(roundName) {
@@ -96,6 +97,7 @@ export function TabletResults({
   const [scores, setScores] = useState({});
   const [winnerSide, setWinnerSide] = useState({});
   const [confirmingMatchId, setConfirmingMatchId] = useState(null);
+  const [showInsights, setShowInsights] = useState(true);
 
   const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
   const matchRows = useMemo(() => matches
@@ -144,6 +146,10 @@ export function TabletResults({
     groups[category] = [...(groups[category] || []), standing];
     return groups;
   }, {});
+  const dynamicFinalPlans = useMemo(() => {
+    const fixtureConfig = selectedEvent?.fixture_config || {};
+    return computeFourPairFinalPlans({ pairs, matches, standings, fixtureConfig });
+  }, [pairs, matches, standings, selectedEvent?.fixture_config]);
 
   const visibleRows = matchRows.filter((row) => (
     (categoryFilter === "all" || row.category === categoryFilter)
@@ -213,6 +219,10 @@ export function TabletResults({
     }));
   }
 
+  function createDynamicMatches(payload) {
+    return onSave(() => api.createMatchesBulk(selectedEventId, payload, false));
+  }
+
   return (
     <section className="tablet-page">
       <div className="tablet-top">
@@ -241,6 +251,9 @@ export function TabletResults({
           <option value="done">Cargados</option>
           <option value="all">Todos</option>
         </select>
+        <button type="button" className="tablet-panel-toggle" onClick={() => setShowInsights((current) => !current)}>
+          {showInsights ? "Ocultar paneles" : "Ver ranking/finales"}
+        </button>
       </div>
 
       {conflictCount > 0 && (
@@ -249,6 +262,57 @@ export function TabletResults({
           <span>Hay marcadores reportados por jugadores que no coinciden. Revisa el partido antes de guardar el resultado oficial.</span>
         </div>
       )}
+
+      {showInsights && <div className="tablet-side-panels">
+        <section className="tablet-dynamic" aria-label="Fases dinámicas">
+          <div className="tablet-panel-title">
+            <Trophy size={16} />
+            <strong>Fase final</strong>
+          </div>
+          {dynamicFinalPlans.length ? dynamicFinalPlans.map((plan) => (
+            <article key={plan.category}>
+              <div>
+                <strong>{plan.category}</strong>
+                <span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span>
+              </div>
+              <p>
+                {plan.semis.length
+                  ? `${plan.standingsRows[0]?.pair ? pairName(plan.standingsRows[0].pair) : "1"} vs ${plan.standingsRows[3]?.pair ? pairName(plan.standingsRows[3].pair) : "4"} · ${plan.standingsRows[1]?.pair ? pairName(plan.standingsRows[1].pair) : "2"} vs ${plan.standingsRows[2]?.pair ? pairName(plan.standingsRows[2].pair) : "3"}`
+                  : plan.finals.length
+                    ? "Final y 3er lugar listos"
+                    : "Esperando resultados"}
+              </p>
+              <div className="tablet-dynamic-actions">
+                <button type="button" disabled={!plan.semis.length || loading} onClick={() => createDynamicMatches(plan.semis)}>
+                  Crear R4
+                </button>
+                <button type="button" disabled={!plan.finals.length || loading} onClick={() => createDynamicMatches(plan.finals)}>
+                  Crear R5
+                </button>
+              </div>
+            </article>
+          )) : (
+            <span className="tablet-muted">Sin categorías de 4 parejas.</span>
+          )}
+        </section>
+
+        <section className="tablet-ranking" aria-label="Ranking resumido">
+          <div className="tablet-panel-title">
+            <Trophy size={16} />
+            <strong>Ranking</strong>
+          </div>
+          {Object.entries(standingsByCategory).length ? Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
+            <article key={category}>
+              <strong>{category}</strong>
+              {categoryStandings.slice(0, 4).map((standing) => (
+                <span key={standing.id}>{standing.position}. {pairName(standing.pair)} · {standing.points} pts</span>
+              ))}
+            </article>
+          )) : (
+            <span className="tablet-muted">El ranking aparece al cargar resultados.</span>
+          )}
+        </section>
+      </div>}
 
       <div className="tablet-match-grid">
         {visibleRows.length ? visibleRows.map((row) => {
@@ -356,16 +420,6 @@ export function TabletResults({
         )}
       </div>
 
-      <section className="tablet-ranking" aria-label="Ranking resumido">
-        {Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
-          <article key={category}>
-            <strong>{category}</strong>
-            {categoryStandings.slice(0, 5).map((standing) => (
-              <span key={standing.id}>{standing.position}. {pairName(standing.pair)} · {standing.points} pts</span>
-            ))}
-          </article>
-        ))}
-      </section>
     </section>
   );
 }

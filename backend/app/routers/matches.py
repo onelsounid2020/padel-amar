@@ -16,6 +16,16 @@ from app.services import generate_fixture, generate_group_fixture, generate_tour
 router = APIRouter(prefix="/events/{event_id}/matches", tags=["matches"])
 
 
+def require_match_management(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> User:
+    permissions = role_permissions(db, user.role)
+    if user.role.value == "superadmin" or permissions.get("events", False) or permissions.get("tablet", False):
+        return user
+    raise HTTPException(status_code=403, detail="No tienes permiso para gestionar partidos")
+
+
 @router.post("", response_model=MatchRead, status_code=201)
 def create_match(
     event_id: int,
@@ -36,19 +46,38 @@ def create_matches_bulk(
     event_id: int,
     payload: MatchBulkCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_permission("events")),
+    user: User = Depends(require_match_management),
 ) -> list[Match]:
     if not payload.matches:
         raise HTTPException(status_code=400, detail="Agrega al menos un partido")
-    _validate_match_schedule(db, event_id, payload.matches, replace_unplayed=payload.replace_unplayed)
+    _validate_match_pairs(db, event_id, payload.matches)
+    permissions = role_permissions(db, user.role)
+    can_manage_events = user.role.value == "superadmin" or permissions.get("events", False)
+    if not can_manage_events:
+        _validate_tablet_bulk_payload(payload)
+    _validate_match_schedule(
+        db,
+        event_id,
+        payload.matches,
+        replace_unplayed=payload.replace_unplayed,
+        replace_category=payload.replace_category,
+    )
     if payload.replace_unplayed:
-        db.execute(
-            delete(Match).where(
-                Match.event_id == event_id,
-                Match.pair_one_score.is_(None),
-                Match.pair_two_score.is_(None),
-            )
+        delete_query = delete(Match).where(
+            Match.event_id == event_id,
+            Match.pair_one_score.is_(None),
+            Match.pair_two_score.is_(None),
         )
+        if payload.replace_category:
+            category_pair_ids = select(EventPair.id).where(
+                EventPair.event_id == event_id,
+                EventPair.category == payload.replace_category,
+            )
+            delete_query = delete_query.where(
+                Match.pair_one_id.in_(category_pair_ids),
+                Match.pair_two_id.in_(category_pair_ids),
+            )
+        db.execute(delete_query)
         db.flush()
     created = []
     for item in payload.matches:
@@ -58,6 +87,35 @@ def create_matches_bulk(
         created.append(match)
     db.commit()
     return created
+
+
+def _validate_tablet_bulk_payload(payload: MatchBulkCreate) -> None:
+    if payload.replace_unplayed or payload.replace_category:
+        raise HTTPException(status_code=403, detail="La tablet no puede reemplazar programaciones existentes")
+    if len(payload.matches) > 4:
+        raise HTTPException(status_code=403, detail="La tablet solo puede crear rondas finales acotadas")
+    for match in payload.matches:
+        round_name = match.round_name or ""
+        if not re.search(r"fase final", round_name, re.IGNORECASE):
+            raise HTTPException(status_code=403, detail="La tablet solo puede crear partidos de fase final")
+        if not re.search(r"ronda\s+[45]|semifinal|final|3er lugar", round_name, re.IGNORECASE):
+            raise HTTPException(status_code=403, detail="La ronda final no es valida para tablet")
+
+
+def _validate_match_pairs(db: Session, event_id: int, matches: list[MatchCreate]) -> None:
+    pair_ids = {pair_id for match in matches for pair_id in (match.pair_one_id, match.pair_two_id)}
+    if not pair_ids:
+        return
+    valid_pair_ids = set(
+        db.scalars(
+            select(EventPair.id).where(
+                EventPair.event_id == event_id,
+                EventPair.id.in_(pair_ids),
+            )
+        )
+    )
+    if pair_ids != valid_pair_ids:
+        raise HTTPException(status_code=400, detail="Todas las parejas deben pertenecer al evento")
 
 
 @router.get("", response_model=list[MatchRead])
@@ -208,11 +266,31 @@ def _validate_match_schedule(
     proposed: list[MatchCreate],
     *,
     replace_unplayed: bool = False,
+    replace_category: str | None = None,
 ) -> None:
     rows: list[tuple[str, int, int, str | None]] = []
     existing = db.scalars(select(Match).where(Match.event_id == event_id)).all()
+    category_pair_ids: set[int] = set()
+    if replace_unplayed and replace_category:
+        category_pair_ids = set(
+            db.scalars(
+                select(EventPair.id).where(
+                    EventPair.event_id == event_id,
+                    EventPair.category == replace_category,
+                )
+            )
+        )
     for match in existing:
-        if replace_unplayed and match.pair_one_score is None and match.pair_two_score is None:
+        should_replace = (
+            replace_unplayed
+            and match.pair_one_score is None
+            and match.pair_two_score is None
+            and (
+                not replace_category
+                or (match.pair_one_id in category_pair_ids and match.pair_two_id in category_pair_ids)
+            )
+        )
+        if should_replace:
             continue
         rows.append((_schedule_key(match.round_name), match.pair_one_id, match.pair_two_id, match.court))
 

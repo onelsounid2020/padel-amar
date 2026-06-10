@@ -70,8 +70,15 @@ export const api = {
     request(`/events/${eventId}/payments/${paymentId}`, { method: "PATCH", body: JSON.stringify(data) }),
   matches: (eventId) => request(`/events/${eventId}/matches`),
   createMatch: (eventId, data) => request(`/events/${eventId}/matches`, { method: "POST", body: JSON.stringify(data) }),
-  createMatchesBulk: (eventId, matches, replaceUnplayed = false) =>
-    request(`/events/${eventId}/matches/bulk`, { method: "POST", body: JSON.stringify({ matches, replace_unplayed: replaceUnplayed }) }),
+  createMatchesBulk: (eventId, matches, replaceUnplayed = false, replaceCategory = "") =>
+    request(`/events/${eventId}/matches/bulk`, {
+      method: "POST",
+      body: JSON.stringify({
+        matches,
+        replace_unplayed: replaceUnplayed,
+        replace_category: replaceCategory || null,
+      }),
+    }),
   generateFixture: (eventId, minimumMatches = 5, courts = [], options = {}) => {
     const params = new URLSearchParams({
       minimum_matches: String(minimumMatches),

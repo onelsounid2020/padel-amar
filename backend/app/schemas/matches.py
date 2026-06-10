@@ -19,6 +19,7 @@ class MatchCreate(BaseModel):
 class MatchBulkCreate(BaseModel):
     matches: list[MatchCreate]
     replace_unplayed: bool = False
+    replace_category: str | None = None
 
 
 class MatchResultUpdate(BaseModel):

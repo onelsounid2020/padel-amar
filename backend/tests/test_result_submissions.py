@@ -9,8 +9,11 @@ from app.database import Base
 from app.models import Event, EventPair, Match, Player, ResultSubmissionStatus, User, UserRole
 from app.routers.matches import submit_player_result
 from app.routers.matches import register_result
+from app.routers.matches import create_matches_bulk
 from app.schemas.matches import ResultSubmissionCreate
 from app.schemas.matches import MatchResultUpdate
+from app.schemas.matches import MatchBulkCreate
+from app.schemas.matches import MatchCreate
 
 
 class ResultSubmissionTest(unittest.TestCase):
@@ -78,6 +81,46 @@ class ResultSubmissionTest(unittest.TestCase):
         self.db.refresh(second)
         self.assertEqual(first.status, ResultSubmissionStatus.descartado)
         self.assertEqual(second.status, ResultSubmissionStatus.confirmado)
+
+    def test_tablet_bulk_can_only_create_final_phase(self) -> None:
+        operator = User(name="Tablet", email="tablet@example.com", password_hash="test", role=UserRole.operador)
+        self.db.add(operator)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            create_matches_bulk(
+                self.event.id,
+                MatchBulkCreate(
+                    matches=[
+                        MatchCreate(
+                            pair_one_id=self.pair_one.id,
+                            pair_two_id=self.pair_two.id,
+                            round_name="5ta - Programacion manual - Ronda 2 - 21:20-21:40",
+                            court="1",
+                        )
+                    ]
+                ),
+                self.db,
+                operator,
+            )
+        self.assertEqual(raised.exception.status_code, 403)
+
+        created = create_matches_bulk(
+            self.event.id,
+            MatchBulkCreate(
+                matches=[
+                    MatchCreate(
+                        pair_one_id=self.pair_one.id,
+                        pair_two_id=self.pair_two.id,
+                        round_name="5ta - Fase final - Ronda 4 Semifinal 1 - 21:20-21:40",
+                        court="1",
+                    )
+                ]
+            ),
+            self.db,
+            operator,
+        )
+        self.assertEqual(len(created), 1)
 
     def _payload(self, one: int, two: int) -> ResultSubmissionCreate:
         return ResultSubmissionCreate(pair_one_score=one, pair_two_score=two)

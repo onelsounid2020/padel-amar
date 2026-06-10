@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, api, setAuthToken } from "./api/client";
+import { computeFourPairFinalPlans } from "./lib/fixtureFinals";
 import { pairName } from "./lib/pairs";
 import { TabletResults } from "./pages/TabletResults";
 import "./styles.css";
@@ -2235,6 +2236,7 @@ function PublicResults({ events, pairs, matches, resultSubmissions, standings, a
 function EventsPage(props) {
   const [eventTab, setEventTab] = useState("event");
   const [showClosedEvents, setShowClosedEvents] = useState(false);
+  const [fixtureSaveState, setFixtureSaveState] = useState("idle");
   const {
     events,
     players,
@@ -2331,9 +2333,15 @@ function EventsPage(props) {
 
   useEffect(() => {
     setEventForm((current) => ({ ...current, fixture_config: fixtureConfig }));
-    if (!selectedEventId || !selectedEvent || fixtureConfigKey === storedFixtureConfigKey) return undefined;
+    if (!selectedEventId || !selectedEvent || fixtureConfigKey === storedFixtureConfigKey) {
+      if (fixtureSaveState === "saving") setFixtureSaveState("saved");
+      return undefined;
+    }
+    setFixtureSaveState("saving");
     const timeout = window.setTimeout(() => {
-      api.updateEvent(selectedEventId, { fixture_config: fixtureConfig }).catch(() => {});
+      api.updateEvent(selectedEventId, { fixture_config: fixtureConfig })
+        .then(() => setFixtureSaveState("saved"))
+        .catch(() => setFixtureSaveState("error"));
     }, 700);
     return () => window.clearTimeout(timeout);
   }, [selectedEventId, selectedEvent?.id, fixtureConfigKey, storedFixtureConfigKey]);
@@ -2505,10 +2513,24 @@ function EventsPage(props) {
                   registrations={registrations}
                   resultSubmissions={resultSubmissions}
                 />
+                <MatchPlanningOverview
+                  pairs={pairs}
+                  matches={matches}
+                  fixtureForm={fixtureForm}
+                  fixtureTiming={fixtureTiming}
+                  configuredCourts={configuredCourts}
+                />
                 <div className="fixture-workbench">
                   <div>
                     <details className="fixture-config" open={!matches.length}>
                       <summary>Configurar programación</summary>
+                    <div className={`fixture-save-state ${fixtureSaveState}`}>
+                      {fixtureSaveState === "saving"
+                        ? "Guardando configuración..."
+                        : fixtureSaveState === "error"
+                          ? "No se pudo guardar la configuración"
+                          : "Configuración guardada"}
+                    </div>
                     <div className="fixture-controls">
                       <label className="wide-field">
                         Modalidad
@@ -2581,7 +2603,7 @@ function EventsPage(props) {
                       </div>
                       {fixtureForm.mode === "groups" ? (
                         <button className="secondary-action wide-field" type="button" onClick={submitGenerateFixture} disabled={!selectedEventId}>
-                          <Swords size={16} /> Generar todos contra todos
+                          <Swords size={16} /> Generar todo el evento
                         </button>
                       ) : (
                         <button className="secondary-action wide-field" type="button" onClick={submitGenerateBracket} disabled={!selectedEventId}>
@@ -2622,7 +2644,14 @@ function EventsPage(props) {
                   rentalMinutes={fixtureTiming.rentalMinutes || 0}
                   startTime={fixtureTiming.fixtureStart || fixtureForm.start_time}
                 />
-                <DynamicFourTaPlan matches={matches} pairs={pairs} eventId={selectedEventId} onChange={run} />
+                <DynamicFourPairFinals
+                  matches={matches}
+                  pairs={pairs}
+                  standings={standings}
+                  eventId={selectedEventId}
+                  fixtureForm={fixtureForm}
+                  onChange={run}
+                />
                 <TournamentBracket matches={matches} pairs={pairs} />
               </div>
             </div>
@@ -4411,6 +4440,98 @@ function roundRobinMatches(pairIds) {
   return rounds;
 }
 
+function matchCategoryPlans(pairs) {
+  const groups = pairs
+    .filter((pair) => pair.status === "completa" && pair.player_two_id)
+    .reduce((acc, pair) => {
+      acc[pair.category] = [...(acc[pair.category] || []), pair];
+      return acc;
+    }, {});
+
+  return Object.entries(groups)
+    .sort(([left], [right]) => String(left).localeCompare(String(right), undefined, { numeric: true }))
+    .map(([category, categoryPairs]) => {
+      const pairIds = categoryPairs.map((pair) => pair.id);
+      const rounds = roundRobinMatches(pairIds);
+      const totalMatches = (categoryPairs.length * Math.max(categoryPairs.length - 1, 0)) / 2;
+      const courtsPerRound = rounds.length ? Math.max(...rounds.map((round) => round.length), 0) : 0;
+      const levels = categoryPairs.map((pair) => Number(pair.skill_level || 5));
+      return {
+        category,
+        pairs: categoryPairs,
+        pairCount: categoryPairs.length,
+        roundCount: rounds.length,
+        totalMatches,
+        courtsPerRound,
+        minLevel: levels.length ? Math.min(...levels) : 0,
+        maxLevel: levels.length ? Math.max(...levels) : 0,
+      };
+    });
+}
+
+function MatchPlanningOverview({ pairs, matches, fixtureForm, fixtureTiming, configuredCourts }) {
+  const plans = matchCategoryPlans(pairs);
+  const plannedMatches = matches.length;
+  const completedMatches = matches.filter(matchHasResult).length;
+  const totalRoundRobinMatches = plans.reduce((sum, plan) => sum + plan.totalMatches, 0);
+  const requiredParallelCourts = plans.reduce((sum, plan) => sum + plan.courtsPerRound, 0);
+  const availableTurns = Math.max(1, Math.floor(Number(fixtureTiming.rentalMinutes || 0) / Number(fixtureForm.set_minutes || 1)));
+  const enoughCourts = !requiredParallelCourts || Number(configuredCourts || 0) >= requiredParallelCourts;
+
+  return (
+    <section className="match-planning-overview">
+      <div className="match-planning-main">
+        <div>
+          <span>Programación</span>
+          <strong>{plannedMatches ? `${plannedMatches} partidos guardados` : "Sin partidos guardados"}</strong>
+          <p>{completedMatches}/{plannedMatches || totalRoundRobinMatches} resultados cargados</p>
+        </div>
+        <div>
+          <span>Bloque</span>
+          <strong>{fixtureTiming.valid ? fixtureTiming.fixtureStart : fixtureForm.start_time}</strong>
+          <p>{availableTurns} turnos de {fixtureForm.set_minutes} min</p>
+        </div>
+        <div className={enoughCourts ? "ok" : "warning"}>
+          <span>Canchas</span>
+          <strong>{configuredCourts || 0}/{requiredParallelCourts || 0}</strong>
+          <p>{enoughCourts ? "Capacidad simultánea suficiente" : "Faltan canchas simultáneas"}</p>
+        </div>
+      </div>
+
+      <div className="match-category-plan-grid">
+        {plans.length ? plans.map((plan) => (
+          <article className="match-category-plan" key={plan.category}>
+            <div>
+              <strong>{plan.category}</strong>
+              <span>{plan.pairCount} parejas</span>
+            </div>
+            <dl>
+              <div>
+                <dt>Cruces</dt>
+                <dd>{plan.totalMatches}</dd>
+              </div>
+              <div>
+                <dt>Rondas</dt>
+                <dd>{plan.roundCount}</dd>
+              </div>
+              <div>
+                <dt>Canchas</dt>
+                <dd>{plan.courtsPerRound}</dd>
+              </div>
+              <div>
+                <dt>Nivel</dt>
+                <dd>N{plan.minLevel}-N{plan.maxLevel}</dd>
+              </div>
+            </dl>
+          </article>
+        )) : (
+          <p className="empty">No hay parejas completas para programar.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function balancedBattleGrid(pairs, roundCount, courtCount) {
   const rounds = buildEmptyPlannerGrid(roundCount, courtCount);
   const usedMatchups = new Set();
@@ -4607,6 +4728,13 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   const categoryPairs = pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id && (!activeCategory || pair.category === activeCategory))
     .sort((a, b) => (a.seed || 9999) - (b.seed || 9999) || a.id - b.id);
+  const activeRoundRobin = roundRobinMatches(categoryPairs.map((pair) => pair.id));
+  const activePlan = {
+    pairs: categoryPairs.length,
+    rounds: activeRoundRobin.length,
+    matches: (categoryPairs.length * Math.max(categoryPairs.length - 1, 0)) / 2,
+    courts: activeRoundRobin.length ? Math.max(...activeRoundRobin.map((round) => round.length), 0) : 0,
+  };
   const plannerStartTime = startTime || fixtureForm.start_time || "10:30";
   const validation = validatePlanner(grid, pairs, matches, {
     category: activeCategory,
@@ -4698,18 +4826,24 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   function fillRoundRobin() {
     const pairIds = categoryPairs.map((pair) => pair.id);
     const matchesByRound = roundRobinMatches(pairIds);
-    const flatMatches = matchesByRound.flat();
-    const nextRounds = Math.max(1, Math.ceil(flatMatches.length / courtCount));
+    const nextRounds = Math.max(1, matchesByRound.length);
+    const requiredCourtCount = Math.max(courtCount, ...matchesByRound.map((round) => round.length), 1);
+    const nextCourts = [...normalizedCourts];
+    for (let index = 1; nextCourts.length < requiredCourtCount; index += 1) {
+      const courtName = String(index);
+      if (!nextCourts.includes(courtName)) nextCourts.push(courtName);
+    }
     setRoundCount(nextRounds);
+    setCourtInput(nextCourts.join(", "));
     setFixtureForm({
       ...fixtureForm,
-      court_count: courtCount,
-      courts: normalizedCourts.join(", "),
-      planner_courts: normalizedCourts.join(", "),
+      court_count: requiredCourtCount,
+      courts: nextCourts.join(", "),
+      planner_courts: nextCourts.join(", "),
       planner_rounds: nextRounds,
     });
-    setGrid(buildEmptyPlannerGrid(nextRounds, courtCount).map((round, roundIndex) =>
-      round.map((slot, courtIndex) => flatMatches[(roundIndex * courtCount) + courtIndex] || slot)
+    setGrid(buildEmptyPlannerGrid(nextRounds, requiredCourtCount).map((round, roundIndex) =>
+      round.map((slot, courtIndex) => matchesByRound[roundIndex]?.[courtIndex] || slot)
     ));
   }
 
@@ -4730,7 +4864,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
         round_name: row.roundName,
         court: row.court,
       }));
-      await api.createMatchesBulk(eventId, payload, replaceUnplayed);
+      await api.createMatchesBulk(eventId, payload, replaceUnplayed, activeCategory);
     });
   }
 
@@ -4740,6 +4874,24 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     <details className="manual-planner" open={!matches.length}>
       <summary>Planner manual por rondas y canchas</summary>
       <div className="manual-planner-body">
+        <div className="planner-command">
+          <div>
+            <span>Categoría activa</span>
+            <strong>{activeCategory || "Sin categoría"}</strong>
+            <p>{activePlan.pairs} parejas · {activePlan.matches} cruces · {activePlan.rounds} rondas</p>
+          </div>
+          <div>
+            <span>Uso recomendado</span>
+            <strong>{activePlan.courts || 0} cancha{activePlan.courts === 1 ? "" : "s"}</strong>
+            <p>{activePlan.rounds || 0} turno{activePlan.rounds === 1 ? "" : "s"} para todos contra todos</p>
+          </div>
+          <div className={validation.issues.length ? "warning" : "ok"}>
+            <span>Estado propuesta</span>
+            <strong>{validation.issues.length ? `${validation.issues.length} alerta(s)` : "Sin conflictos"}</strong>
+            <p>{validation.plannedCount}/{validation.totalRoundRobin} cruces listos</p>
+          </div>
+        </div>
+
         <div className="planner-toolbar">
           <label>
             Categoría
@@ -4783,19 +4935,19 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
                 setFixtureForm({ ...fixtureForm, planner_replace_unplayed: event.target.checked });
               }}
             />
-            <span>Reemplazar sin resultado</span>
+            <span>Reemplazar esta categoría</span>
           </label>
           <button type="button" className="secondary-action" onClick={fillRoundRobin} disabled={categoryPairs.length < 2}>
-            <Grid2X2 size={16} /> Proponer todos contra todos
+            <Grid2X2 size={16} /> Todos contra todos
           </button>
           <button type="button" className="secondary-action" onClick={fillBalancedBattles} disabled={categoryPairs.length < 2}>
-            <Target size={16} /> Batallas equilibradas
+            <Target size={16} /> Por nivel
           </button>
           <button type="button" className="secondary-action" onClick={clearGrid}>
             Limpiar
           </button>
           <button type="button" onClick={savePlanner} disabled={!canSave}>
-            <Save size={16} /> Guardar {validation.plannedCount}
+            <Save size={16} /> Guardar {validation.plannedCount || ""}
           </button>
         </div>
 
@@ -4901,177 +5053,70 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
   );
 }
 
-function DynamicFourTaPlan({ matches, pairs, eventId, onChange }) {
+function DynamicFourPairFinals({ matches, pairs, standings, eventId, fixtureForm, onChange }) {
   const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
-  const groupMatches = matches
-    .map((match) => {
-      const schedule = parseFixtureRound(match.round_name);
-      const pairOne = pairById.get(match.pair_one_id);
-      const pairTwo = pairById.get(match.pair_two_id);
-      const category = fixtureCategoryFromPairs(pairOne, pairTwo, schedule.category);
-      return { match, schedule, pairOne, pairTwo, category };
-    })
-    .filter((row) => row.category === "4ta" && /^Grupo\s+/i.test(row.schedule.group || ""));
+  const plans = computeFourPairFinalPlans({ pairs, matches, standings, fixtureConfig: fixtureForm });
 
-  if (!groupMatches.length) return null;
+  if (!plans.length) return null;
 
-  const groups = groupMatches.reduce((collection, row) => {
-    const groupName = row.schedule.group;
-    if (!collection[groupName]) collection[groupName] = new Map();
-    [row.pairOne, row.pairTwo].filter(Boolean).forEach((pair) => {
-      if (!collection[groupName].has(pair.id)) collection[groupName].set(pair.id, emptyStanding(pair));
-    });
-
-    if (isNumericScore(row.match.pair_one_score) && isNumericScore(row.match.pair_two_score)) {
-      const one = collection[groupName].get(row.match.pair_one_id);
-      const two = collection[groupName].get(row.match.pair_two_id);
-      const oneScore = Number(row.match.pair_one_score);
-      const twoScore = Number(row.match.pair_two_score);
-      one.played += 1;
-      two.played += 1;
-      one.pointsFor += oneScore;
-      one.pointsAgainst += twoScore;
-      two.pointsFor += twoScore;
-      two.pointsAgainst += oneScore;
-      if (oneScore > twoScore) {
-        one.won += 1;
-        two.lost += 1;
-        one.points += 3;
-      } else if (twoScore > oneScore) {
-        two.won += 1;
-        one.lost += 1;
-        two.points += 3;
-      } else {
-        one.points += 1;
-        two.points += 1;
-      }
-    }
-    return collection;
-  }, {});
-
-  const orderedGroupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const groupLeaders = Object.fromEntries(
-    orderedGroupNames.map((groupName) => [groupName, sortStandings([...groups[groupName].values()])[0] || null]),
-  );
-  const groupRows = orderedGroupNames.map((groupName) => ({
-    groupName,
-    standings: sortStandings([...groups[groupName].values()]),
-    leader: groupLeaders[groupName],
-  }));
-
-  const semiOne = {
-    court: "Cancha 1",
-    time: "22:15",
-    label: "Semifinal 1",
-    one: groupLeaders["Grupo A"]?.pair,
-    two: groupLeaders["Grupo D"]?.pair,
-  };
-  const semiTwo = {
-    court: "Cancha 3",
-    time: "22:15",
-    label: "Semifinal 2",
-    one: groupLeaders["Grupo B"]?.pair,
-    two: groupLeaders["Grupo C"]?.pair,
-  };
-  const existingSemiOne = matches.find((match) => /4ta/i.test(match.round_name || "") && /Semifinal 1/i.test(match.round_name || ""));
-  const existingSemiTwo = matches.find((match) => /4ta/i.test(match.round_name || "") && /Semifinal 2/i.test(match.round_name || ""));
-  const existingFinal = matches.find((match) => /4ta/i.test(match.round_name || "") && /\bTorneo - Final\b/i.test(match.round_name || ""));
-  const existingThirdPlace = matches.find((match) => /4ta/i.test(match.round_name || "") && /3er lugar/i.test(match.round_name || ""));
-  const semiOneResult = resolveMatchResult(existingSemiOne);
-  const semiTwoResult = resolveMatchResult(existingSemiTwo);
-  const finalPairs = [semiOneResult.winnerId, semiTwoResult.winnerId].map((id) => pairById.get(id)).filter(Boolean);
-  const thirdPlacePairs = [semiOneResult.loserId, semiTwoResult.loserId].map((id) => pairById.get(id)).filter(Boolean);
-  const canCreateSemis = eventId && semiOne.one && semiOne.two && semiTwo.one && semiTwo.two && (!existingSemiOne || !existingSemiTwo);
-  const canCreateFinals = eventId && finalPairs.length === 2 && thirdPlacePairs.length === 2 && (!existingFinal || !existingThirdPlace);
-
-  function createSemifinals() {
-    return onChange(() => Promise.all([
-      !existingSemiOne && api.createMatch(eventId, {
-        pair_one_id: semiOne.one.id,
-        pair_two_id: semiOne.two.id,
-        round_name: "4ta - Torneo - Semifinal 1 - 22:15",
-        court: "cancha 1",
-      }),
-      !existingSemiTwo && api.createMatch(eventId, {
-        pair_one_id: semiTwo.one.id,
-        pair_two_id: semiTwo.two.id,
-        round_name: "4ta - Torneo - Semifinal 2 - 22:15",
-        court: "cancha 3",
-      }),
-    ].filter(Boolean)));
-  }
-
-  function createFinals() {
-    return onChange(() => Promise.all([
-      !existingFinal && api.createMatch(eventId, {
-        pair_one_id: finalPairs[0].id,
-        pair_two_id: finalPairs[1].id,
-        round_name: "4ta - Torneo - Final - 22:40",
-        court: "cancha 1",
-      }),
-      !existingThirdPlace && api.createMatch(eventId, {
-        pair_one_id: thirdPlacePairs[0].id,
-        pair_two_id: thirdPlacePairs[1].id,
-        round_name: "4ta - Torneo - 3er lugar - 22:40",
-        court: "cancha 3",
-      }),
-    ].filter(Boolean)));
+  function createMatches(payload) {
+    return onChange(() => api.createMatchesBulk(eventId, payload, false));
   }
 
   return (
     <article className="data-block dynamic-plan">
       <div className="block-head">
-        <h3>Clasificación dinámica 4ta</h3>
-        <span>Mejor de cada grupo</span>
+        <h3>Fase final automática</h3>
+        <span>Ronda 4 y 5 por ranking</span>
       </div>
-      <div className="qualifier-grid">
-        {groupRows.map(({ groupName, leader, standings }) => (
-          <div className="qualifier-card" key={groupName}>
-            <span>{groupName}</span>
-            <strong>{leader ? pairName(leader.pair) : "Pendiente"}</strong>
-            <small>
-              {leader
-                ? `${leader.points} pts · ${leader.won}G · dif ${standingDiff(leader)}`
-                : "Faltan resultados"}
-            </small>
-            <ol>
-              {standings.slice(0, 4).map((standing) => (
-                <li key={standing.pair.id}>
-                  {pairName(standing.pair)} <b>{standing.points}</b>
-                </li>
-              ))}
-            </ol>
-          </div>
-        ))}
-      </div>
-
-      <div className="dynamic-court-plan">
-        {[semiOne, semiTwo].map((item) => (
-          <div className="dynamic-court-card" key={item.label}>
-            <span>{item.time} · {item.court}</span>
-            <strong>{item.label}</strong>
-            <p>{item.one ? pairName(item.one) : "Ganador Grupo"} vs {item.two ? pairName(item.two) : "Ganador Grupo"}</p>
-          </div>
-        ))}
-        <div className="dynamic-court-card">
-          <span>22:40 · Cancha 1</span>
-          <strong>Final 4ta</strong>
-          <p>{finalPairs.length === 2 ? `${pairName(finalPairs[0])} vs ${pairName(finalPairs[1])}` : "Se define con los ganadores de semifinal"}</p>
-        </div>
-        <div className="dynamic-court-card">
-          <span>22:40 · Cancha 3</span>
-          <strong>3er lugar 4ta</strong>
-          <p>{thirdPlacePairs.length === 2 ? `${pairName(thirdPlacePairs[0])} vs ${pairName(thirdPlacePairs[1])}` : "Se define con los perdedores de semifinal"}</p>
-        </div>
-      </div>
-      <div className="dynamic-actions">
-        <button type="button" className="secondary-action" disabled={!canCreateSemis} onClick={createSemifinals}>
-          Crear semifinales 22:15
-        </button>
-        <button type="button" className="secondary-action" disabled={!canCreateFinals} onClick={createFinals}>
-          Crear final y 3er lugar 22:40
-        </button>
-      </div>
+      {plans.map((plan) => {
+        const missingSemis = plan.semis;
+        const missingFinals = plan.finals;
+        const canCreateSemis = eventId && plan.allGroupResults && missingSemis.length > 0;
+        const canCreateFinals = eventId && plan.existingSemiOne && plan.existingSemiTwo && hasResult(plan.existingSemiOne) && hasResult(plan.existingSemiTwo) && missingFinals.length > 0;
+        return (
+          <section className="dynamic-category-plan" key={plan.category}>
+            <div className="fixture-turn-title">
+              <strong>{plan.category}</strong>
+              <span>{plan.allGroupResults ? "ranking listo" : `${plan.finishedGroupMatches}/${plan.totalGroupMatches} resultados fase`}</span>
+            </div>
+            <div className="qualifier-grid">
+              <div className="qualifier-card">
+                <span>Tabla tras ronda 3</span>
+                <strong>{plan.allGroupResults ? "Definida" : "Pendiente"}</strong>
+                <small>Ordena por puntos, ganados, diferencia, juegos a favor y seed.</small>
+                <ol>
+                  {plan.standingsRows.map((standing, index) => (
+                    <li key={standing.pair_id || standing.pair.id}>
+                      {index + 1}. {pairName(standing.pair || pairById.get(standing.pair_id))} <b>{standing.points}</b>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <div className="dynamic-court-card">
+                <span>Ronda 4 · {plan.semiTime}</span>
+                <strong>Semifinales</strong>
+                <p>{plan.semis[0] ? `${pairName(pairById.get(plan.semis[0].pair_one_id))} vs ${pairName(pairById.get(plan.semis[0].pair_two_id))}` : "1 vs 4"}</p>
+                <p>{plan.semis[1] ? `${pairName(pairById.get(plan.semis[1].pair_one_id))} vs ${pairName(pairById.get(plan.semis[1].pair_two_id))}` : "2 vs 3"}</p>
+              </div>
+              <div className="dynamic-court-card">
+                <span>Ronda 5 · {plan.finalTime}</span>
+                <strong>Final y 3er lugar</strong>
+                <p>{plan.finals[0] ? `${pairName(pairById.get(plan.finals[0].pair_one_id))} vs ${pairName(pairById.get(plan.finals[0].pair_two_id))}` : "Ganadores a la final"}</p>
+                <p>{plan.finals[1] ? `${pairName(pairById.get(plan.finals[1].pair_one_id))} vs ${pairName(pairById.get(plan.finals[1].pair_two_id))}` : "Perdedores por 3er lugar"}</p>
+              </div>
+            </div>
+            <div className="dynamic-actions">
+              <button type="button" className="secondary-action" disabled={!canCreateSemis} onClick={() => createMatches(missingSemis)}>
+                Crear ronda 4
+              </button>
+              <button type="button" className="secondary-action" disabled={!canCreateFinals} onClick={() => createMatches(missingFinals)}>
+                Crear ronda 5
+              </button>
+            </div>
+          </section>
+        );
+      })}
       <p className="muted">Desempate actual: puntos, partidos ganados, diferencia, juegos a favor y seed de inscripción.</p>
     </article>
   );
