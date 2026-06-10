@@ -12,20 +12,27 @@ Aplicación web MVP para gestionar eventos de pádel con FastAPI, PostgreSQL, SQ
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env
+cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
 La API queda en `http://localhost:8000` y la documentación en `http://localhost:8000/docs`.
+
+Para correr los tests backend usa el Python del entorno virtual, no el Python global:
+
+```bash
+cd backend
+.venv/bin/python -m unittest discover -s tests
+```
 
 ## Frontend local
 
 ```bash
 cd frontend
 npm install
-copy .env.example .env
+cp .env.example .env
 npm run dev
 ```
 
