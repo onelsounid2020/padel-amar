@@ -9,6 +9,8 @@ import {
   ExternalLink,
   FileCheck2,
   Check,
+  Eye,
+  EyeOff,
   ListChecks,
   Medal,
   RefreshCw,
@@ -85,6 +87,12 @@ const rankingTiebreakerOptions = [
   { value: "played", label: "Partidos jugados" },
 ];
 
+const pairLevelOptions = [
+  { value: 4, label: "Bajo", tone: "low" },
+  { value: 6, label: "Medio", tone: "mid" },
+  { value: 8, label: "Alto", tone: "high" },
+];
+
 const emptyPlayer = { name: "", phone: "", category: "", preferred_side: "indiferente" };
 const emptyPublicRegistration = {
   name: "",
@@ -102,41 +110,6 @@ const emptyPublicRegistration = {
   partner_preferred_side: "indiferente",
 };
 const emptyPublicResult = { round_name: "", match_id: "", pair_one_score: "", pair_two_score: "" };
-
-const modalityOptions = [
-  { value: "five_consecutive", label: "5 partidos seguidos" },
-  { value: "group_ranking_best", label: "Ranking por grupos, clasifica el mejor" },
-  { value: "round_robin_groups", label: "Todos contra todos por grupos" },
-  { value: "ranking_only", label: "Solo ranking" },
-];
-
-const defaultCategoryConfig = {
-  category: "",
-  modality: "five_consecutive",
-  group_size: 4,
-  guaranteed_matches: 5,
-  qualifiers_per_group: 1,
-  notes: "",
-};
-
-const amarTodayCategoryConfigs = [
-  {
-    category: "5ta",
-    modality: "five_consecutive",
-    group_size: 6,
-    guaranteed_matches: 5,
-    qualifiers_per_group: 0,
-    notes: "5 partidos seguidos por grupo.",
-  },
-  {
-    category: "4ta",
-    modality: "group_ranking_best",
-    group_size: 4,
-    guaranteed_matches: 3,
-    qualifiers_per_group: 1,
-    notes: "3 partidos de ranking. Pasa el mejor de cada grupo.",
-  },
-];
 
 const fallbackPermissionModules = [
   { key: "events", label: "Eventos", description: "Crear eventos, editar configuración y organizar parejas." },
@@ -263,6 +236,7 @@ function pageFromLocation() {
   if (path === "/crear-cuenta" || view === "signup") return "signup";
   if (path === "/registro" || view === "register") return "register";
   if (path === "/resultados" || view === "results") return "results";
+  if (path === "/partidos" || view === "matches") return "matches";
   return "events";
 }
 
@@ -358,6 +332,7 @@ function App() {
       events: "/",
       register: "/registro",
       results: "/resultados",
+      matches: "/partidos",
       tablet: "/tablet",
       users: "/usuarios",
       profiles: "/perfiles",
@@ -1099,6 +1074,53 @@ function App() {
       loading={loading}
       onRefresh={() => run(loadBase)}
     />
+  ) : page === "matches" ? (
+    canAccess("events") ? <EventsPage
+      events={events}
+      players={players}
+      members={members}
+      pairs={pairs}
+      payments={payments}
+      registrations={registrations}
+      matches={matches}
+      resultSubmissions={resultSubmissions}
+      standings={standings}
+      ranking={ranking}
+      selectedEvent={selectedEvent}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={selectEventId}
+      eventForm={eventForm}
+      setEventForm={setEventForm}
+      playerForm={playerForm}
+      setPlayerForm={setPlayerForm}
+      pairForm={pairForm}
+      setPairForm={setPairForm}
+      matchForm={matchForm}
+      setMatchForm={setMatchForm}
+      fixtureForm={fixtureForm}
+      setFixtureForm={setFixtureForm}
+      resultForm={resultForm}
+      setResultForm={setResultForm}
+      rankingConfigForm={rankingConfigForm}
+      setRankingConfigForm={setRankingConfigForm}
+      whatsapp={whatsapp}
+      submitEvent={submitEvent}
+      submitPlayer={submitPlayer}
+      submitPair={submitPair}
+      submitMatch={submitMatch}
+      submitGenerateFixture={submitGenerateFixture}
+      submitGenerateBracket={submitGenerateBracket}
+      submitRankingConfig={submitRankingConfig}
+      deleteSelectedEvent={deleteSelectedEvent}
+      closeSelectedEvent={closeSelectedEvent}
+      activateSelectedEvent={activateSelectedEvent}
+      closePastEvents={closePastEvents}
+      updateRegistration={updateRegistration}
+      confirmAction={confirmAction}
+      authUser={authUser}
+      run={run}
+      forcedTab="matches"
+    /> : <AccessDenied moduleName="Partidos" />
   ) : page === "users" ? (
     canAccess("users") ? (
       <UsersPage
@@ -1184,6 +1206,7 @@ function App() {
           {authUser?.role === "jugador" && <button className={page === "player" ? "active" : ""} onClick={() => navigatePage("player")}>Mi perfil</button>}
           {authUser?.role === "jugador" && <button className={page === "partners" ? "active" : ""} onClick={() => navigatePage("partners")}>Partners</button>}
           {canAccess("events") && <button className={page === "events" ? "active" : ""} onClick={() => navigatePage("events")}>Eventos</button>}
+          {canAccess("events") && <button className={page === "matches" ? "active" : ""} onClick={() => navigatePage("matches")}>Partidos</button>}
           {canAccess("register") && <button className={page === "register" ? "active" : ""} onClick={() => navigatePage("register")}>Registro</button>}
           {canAccess("results") && <button className={page === "results" ? "active" : ""} onClick={() => navigatePage("results")}>Resultados</button>}
           {canAccess("users") && (
@@ -1220,7 +1243,7 @@ function App() {
     );
   }
 
-  if (!authUser && ["events", "users", "profiles", "player", "partners"].includes(page)) {
+  if (!authUser && ["events", "matches", "users", "profiles", "player", "partners"].includes(page)) {
     return (
       <main className="app-shell">
         {error && <div className="alert">{error}</div>}
@@ -1300,6 +1323,8 @@ function ConfirmModal({ dialog, setDialog, loading }) {
 }
 
 function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup }) {
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <section className={compact ? "login-page compact" : "login-page"}>
       <div className="login-card">
@@ -1320,14 +1345,25 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
           </label>
           <label className="form-field">
             <span>Contraseña</span>
-            <input
-              type="password"
-              name="amar-login-password"
-              autoComplete="new-password"
-              value={form.password}
-              onChange={(event) => setForm({ ...form, password: event.target.value })}
-              required
-            />
+            <div className="password-input-wrap">
+              <input
+                type={showPassword ? "text" : "password"}
+                name="amar-login-password"
+                autoComplete="new-password"
+                value={form.password}
+                onChange={(event) => setForm({ ...form, password: event.target.value })}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((current) => !current)}
+                aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </label>
           <button disabled={loading}>Entrar</button>
         </form>
@@ -2330,7 +2366,9 @@ function EventsPage(props) {
     confirmAction,
     authUser,
     run,
+    forcedTab,
   } = props;
+  const activeEventTab = forcedTab || eventTab;
   const fixtureConfig = { ...defaultFixtureConfig, ...(fixtureForm || {}) };
   const fixtureConfigKey = JSON.stringify(fixtureConfig);
   const storedFixtureConfigKey = JSON.stringify({ ...defaultFixtureConfig, ...(selectedEvent?.fixture_config || {}) });
@@ -2357,7 +2395,7 @@ function EventsPage(props) {
     setSelectedEventId("");
     setEventForm({ ...emptyEvent });
     setRankingConfigForm({ ...defaultRankingConfig });
-    setEventTab("event");
+    if (!forcedTab) setEventTab("event");
   }
 
   useEffect(() => {
@@ -2401,22 +2439,22 @@ function EventsPage(props) {
     <section className="workspace">
       <section className="panel main-panel">
         <div className="section-head">
-          <h2><ListChecks size={18} /> Operación del evento</h2>
+          <h2>{forcedTab === "matches" ? <Swords size={18} /> : <ListChecks size={18} />} {forcedTab === "matches" ? "Partidos" : "Operación del evento"}</h2>
           <div className="event-picker">
-            <button type="button" className="secondary-action" onClick={startNewEvent}>
+            {!forcedTab && <button type="button" className="secondary-action" onClick={startNewEvent}>
               <CalendarPlus size={16} /> Nuevo evento
-            </button>
-            <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
+            </button>}
+            {!forcedTab && <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
               Eliminar
-            </button>
-            <label className="event-history-toggle">
+            </button>}
+            {!forcedTab && <label className="event-history-toggle">
               <input
                 type="checkbox"
                 checked={showClosedEvents}
                 onChange={(event) => setShowClosedEvents(event.target.checked)}
               />
               <span>Ver cerrados</span>
-            </label>
+            </label>}
             <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)}>
               <option value="">Seleccionar evento</option>
               {visibleEvents.map((event) => (
@@ -2437,15 +2475,14 @@ function EventsPage(props) {
               {!isEventActive(selectedEvent) && <em>Evento cerrado</em>}
             </div>
 
-            <div className="event-tabs">
+            {!forcedTab && <div className="event-tabs">
               <button className={eventTab === "event" ? "active" : ""} onClick={() => setEventTab("event")}>Evento</button>
               <button className={eventTab === "organization" ? "active" : ""} onClick={() => setEventTab("organization")}>Organización</button>
-              <button className={eventTab === "matches" ? "active" : ""} onClick={() => setEventTab("matches")}>Partidos</button>
               <button className={eventTab === "payments" ? "active" : ""} onClick={() => setEventTab("payments")}>Pagos</button>
               <button className={eventTab === "ranking" ? "active" : ""} onClick={() => setEventTab("ranking")}>Ranking</button>
-            </div>
+            </div>}
 
-            {eventTab === "event" && (
+            {activeEventTab === "event" && (
               <div className="organization-section">
                 <EventForm form={eventForm} setForm={setEventForm} onSubmit={submitEvent} isEditing={Boolean(selectedEventId)} />
                 <EventWhatsappBlock whatsapp={whatsapp} draftEvent={eventForm} />
@@ -2485,9 +2522,15 @@ function EventsPage(props) {
               </div>
             )}
 
-            {eventTab === "organization" && (
+            {activeEventTab === "organization" && (
             <>
             <OperationsStatus
+              pairs={pairs}
+              payments={payments}
+              registrations={registrations}
+              matches={matches}
+            />
+            <OrganizationReadiness
               pairs={pairs}
               payments={payments}
               registrations={registrations}
@@ -2498,119 +2541,48 @@ function EventsPage(props) {
               selectedEventId={selectedEventId}
               onUpdateRegistration={updateRegistration}
             />
-            <div className="columns">
-              <div>
-                <h3><UserPlus size={16} /> Jugadores</h3>
-                <form onSubmit={submitPlayer} className="compact-form">
-                  <input placeholder="Nombre" value={playerForm.name} onChange={(e) => setPlayerForm({ ...playerForm, name: e.target.value })} required />
-                  <input placeholder="Teléfono" value={playerForm.phone} onChange={(e) => setPlayerForm({ ...playerForm, phone: e.target.value })} />
-                  <CategorySelect value={playerForm.category} onChange={(value) => setPlayerForm({ ...playerForm, category: value })} />
-                  <select value={playerForm.preferred_side} onChange={(e) => setPlayerForm({ ...playerForm, preferred_side: e.target.value })}>
-                    <option value="drive">Drive</option>
-                    <option value="reves">Revés</option>
-                    <option value="indiferente">Indiferente</option>
-                  </select>
-                  <button><UserPlus size={16} /> Agregar</button>
-                </form>
-              </div>
-
-              <div>
-                <h3><Users size={16} /> Parejas</h3>
-                <form onSubmit={submitPair} className="compact-form">
-                  <select value={pairForm.player_one_id} onChange={(e) => setPairForm({ ...pairForm, player_one_id: e.target.value })} required>
-                    <option value="">Jugador 1</option>
-                    {participantOptions.map((option) => <option key={option.value} value={option.value}>{option.name}{option.kind === "member" ? " · cuenta" : ""}</option>)}
-                  </select>
-                  <select value={pairForm.player_two_id} onChange={(e) => setPairForm({ ...pairForm, player_two_id: e.target.value })}>
-                    <option value="">Jugador 2 opcional</option>
-                    {participantOptions
-                      .filter((option) => option.value !== pairForm.player_one_id)
-                      .map((option) => <option key={option.value} value={option.value}>{option.name}{option.kind === "member" ? " · cuenta" : ""}</option>)}
-                  </select>
-                  <CategorySelect value={pairForm.category} onChange={(value) => setPairForm({ ...pairForm, category: value })} />
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    placeholder="Nivel dupla"
-                    value={pairForm.skill_level}
-                    onChange={(e) => setPairForm({ ...pairForm, skill_level: e.target.value })}
-                  />
-                  <select value={pairForm.status} onChange={(e) => setPairForm({ ...pairForm, status: e.target.value })}>
-                    <option value="completa">Completa</option>
-                    <option value="buscando_partner">Buscando partner</option>
-                    <option value="lista_espera">Lista de espera</option>
-                  </select>
-                  <button><Users size={16} /> Crear pareja</button>
-                </form>
-              </div>
-            </div>
-
+            <PartnerMatchingBlock
+              pairs={pairs}
+              participantOptions={participantOptions}
+              eventId={selectedEventId}
+              onChange={run}
+            />
             <div className="data-grid">
-                  <PairsBlock pairs={pairs} participantOptions={participantOptions} eventId={selectedEventId} onChange={run} confirmAction={confirmAction} />
+                  <PairsBlock
+                    pairs={pairs}
+                    participantOptions={participantOptions}
+                    payments={payments}
+                    registrations={registrations}
+                    eventId={selectedEventId}
+                    onChange={run}
+                    confirmAction={confirmAction}
+                  />
             </div>
 
             </>
             )}
 
-            {eventTab === "matches" && (
+            {activeEventTab === "matches" && (
             <div className="organization-section">
               <div className="data-block fixture-card">
                 <div className="block-head">
                   <h3><Swords size={16} /> Partidos</h3>
                 </div>
-                <OperatorControlTower
+                <TournamentSetupPanel
+                  selectedEvent={selectedEvent}
                   pairs={pairs}
-                  matches={matches}
-                  payments={payments}
                   registrations={registrations}
-                  resultSubmissions={resultSubmissions}
-                />
-                <MatchPlanningOverview
-                  pairs={pairs}
                   matches={matches}
                   fixtureForm={fixtureForm}
+                  setFixtureForm={setFixtureForm}
                   fixtureTiming={fixtureTiming}
                   configuredCourts={configuredCourts}
                 />
-                <div className="fixture-workbench">
-                  <div>
-                    <ManualFixturePlanner
-                      eventId={selectedEventId}
-                      pairs={pairs}
-                      matches={matches}
-                      fixtureForm={fixtureForm}
-                      setFixtureForm={setFixtureForm}
-                      startTime={fixtureTiming.fixtureStart || fixtureForm.start_time}
-                      run={run}
-                    />
-                  </div>
-                </div>
-                <FixturePreview
-                  matches={matches}
-                  pairs={pairs}
-                  configuredCourts={fixtureForm.courts}
-                  resultForm={resultForm}
-                  setResultForm={setResultForm}
-                  eventId={selectedEventId}
-                  onChange={run}
-                  rentalMinutes={fixtureTiming.rentalMinutes || 0}
-                  startTime={fixtureTiming.fixtureStart || fixtureForm.start_time}
-                />
-                <DynamicFourPairFinals
-                  matches={matches}
-                  pairs={pairs}
-                  standings={standings}
-                  eventId={selectedEventId}
-                  fixtureForm={fixtureForm}
-                  onChange={run}
-                />
-                <TournamentBracket matches={matches} pairs={pairs} />
               </div>
             </div>
             )}
 
-            {eventTab === "payments" && (
+            {activeEventTab === "payments" && (
               <div className="payments-grid">
                 <PaymentBlock payments={payments} pairs={pairs} players={players} eventId={selectedEventId} onChange={run} />
                 <div className="data-block">
@@ -2620,7 +2592,7 @@ function EventsPage(props) {
               </div>
             )}
 
-            {eventTab === "ranking" && (
+            {activeEventTab === "ranking" && (
               <div className="ranking-section">
                 <div className="ranking-admin-grid">
                   <RankingConfigPanel
@@ -2693,16 +2665,535 @@ function OperationsStatus({ pairs, payments, registrations, matches }) {
   );
 }
 
+function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matches, fixtureForm, setFixtureForm, fixtureTiming, configuredCourts }) {
+  const categories = matchCategoryPlans(pairs);
+  const scheduledRows = scheduledMatchRows(matches, pairs).filter((row) => row.time || row.turn);
+  const scheduledStartMinutes = scheduledRows.map((row) => minutesFromSlot(row.time || row.turn)).filter((minutes) => minutes !== 9999);
+  const scheduledEndMinutes = scheduledRows.map((row) => slotEndMinutes(row.time || row.turn)).filter(Boolean);
+  const scheduledStart = scheduledStartMinutes.length ? Math.min(...scheduledStartMinutes) : null;
+  const scheduledEnd = scheduledEndMinutes.length ? Math.max(...scheduledEndMinutes) : null;
+  const scheduledCourts = [...new Set(scheduledRows.map((row) => row.court).filter(Boolean))];
+  const displayedStart = scheduledStart !== null && Number.isFinite(scheduledStart) ? minutesToTime(scheduledStart) : (fixtureForm.start_time || fixtureTiming.fixtureStart || "");
+  const displayedEnd = scheduledEnd ? minutesToTime(scheduledEnd) : (fixtureTiming.eventEnd || "");
+  const effectiveMinutes = Number(fixtureForm.set_minutes || 20);
+  const availableTurns = Math.max(1, Math.floor(Number(fixtureTiming.rentalMinutes || 0) / Math.max(1, effectiveMinutes)));
+  const expectedPairsFromCapacity = Math.ceil(Number(selectedEvent?.capacity || 0) / 2);
+  const completePairs = pairs.filter((pair) => pair.status === "completa" && pair.player_two_id).length;
+  const planningPairs = Math.max(completePairs, expectedPairsFromCapacity);
+  const guaranteedMatches = Math.ceil((planningPairs * Number(fixtureForm.guaranteed_matches || 1)) / 2);
+  const finalMatches = Number(fixtureForm.include_finals || 0) ? Math.max(0, categories.length * 2) : 0;
+  const totalMatchesToPlan = guaranteedMatches + finalMatches;
+  const recommendedCourts = Math.max(1, Math.ceil(totalMatchesToPlan / availableTurns));
+  const courtDelta = Math.max(0, recommendedCourts - Number(configuredCourts || 0));
+  const format = fixtureForm.mode || "manual_groups";
+
+  function update(patch) {
+    setFixtureForm({ ...fixtureForm, ...patch });
+  }
+
+  return (
+    <section className="tournament-setup">
+      <div className="tournament-setup-head">
+        <div>
+          <span>Configuración del torneo</span>
+          <strong>{displayedStart && displayedEnd ? `${displayedStart}-${displayedEnd} · ${availableTurns} turnos útiles` : "Horario pendiente"}</strong>
+        </div>
+        <div className={courtDelta ? "setup-pill warning" : "setup-pill ok"}>
+          Pedir {recommendedCourts} cancha{recommendedCourts === 1 ? "" : "s"}
+        </div>
+      </div>
+
+      <div className="setup-kpi-grid">
+        <article>
+          <span>Programación actual</span>
+          <strong>{scheduledRows.length ? `${scheduledRows.length} partidos` : "Sin partidos"}</strong>
+          <small>{scheduledRows.length ? `${scheduledCourts.length} canchas usadas` : "El planner llenará este dato."}</small>
+        </article>
+        <article>
+          <span>Cupos del evento</span>
+          <strong>{selectedEvent?.capacity || 0} jugadores</strong>
+          <small>{planningPairs} parejas estimadas para cálculo.</small>
+        </article>
+        <article className={courtDelta ? "warning" : "ok"}>
+          <span>Capacidad sugerida</span>
+          <strong>{recommendedCourts} cancha{recommendedCourts === 1 ? "" : "s"}</strong>
+          <small>{courtDelta ? `Faltan ${courtDelta} según configuración actual.` : "La configuración alcanza."}</small>
+        </article>
+      </div>
+
+      <div className="tournament-setup-grid">
+        <label className="form-field">
+          <span>Formato</span>
+          <select value={format} onChange={(event) => update({ mode: event.target.value })}>
+            <option value="manual_groups">Manual por grupos</option>
+            <option value="americano_inteligente">Americano inteligente</option>
+            <option value="round_robin">Todos contra todos</option>
+            <option value="groups_finals">Grupos + finales</option>
+            <option value="timed_battles">Batallas por nivel</option>
+            <option value="bracket">Eliminación directa</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Inicio partidos</span>
+          <input value={displayedStart || "17:00"} onChange={(event) => update({ start_time: event.target.value })} readOnly={Boolean(scheduledRows.length)} />
+        </label>
+        <label className="form-field">
+          <span>Fin estimado</span>
+          <input value={displayedEnd || ""} readOnly />
+        </label>
+        <label className="form-field">
+          <span>Minutos partido</span>
+          <input type="number" min="1" value={fixtureForm.set_minutes} onChange={(event) => update({ set_minutes: event.target.value })} />
+        </label>
+        <label className="form-field">
+          <span>Paleteo</span>
+          <select value={fixtureForm.warmup_minutes} onChange={(event) => update({ warmup_minutes: event.target.value })}>
+            <option value="0">Sin paleteo</option>
+            <option value="5">5 minutos</option>
+            <option value="10">10 minutos</option>
+            <option value="15">15 minutos</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Canchas</span>
+          <input value={fixtureForm.courts} onChange={(event) => {
+            const courts = parseCourtList(event.target.value);
+            update({ courts: event.target.value, court_count: courts.length, planner_courts: courts.join(", ") });
+          }} />
+        </label>
+        <label className="form-field">
+          <span>Parejas/grupo</span>
+          <input type="number" min="2" value={fixtureForm.group_size} onChange={(event) => update({ group_size: event.target.value })} />
+        </label>
+        <label className="form-field">
+          <span>Garantizados</span>
+          <input type="number" min="1" value={fixtureForm.guaranteed_matches} onChange={(event) => update({ guaranteed_matches: event.target.value })} />
+        </label>
+        <label className="form-field">
+          <span>Criterio visual</span>
+          <select value={fixtureForm.balance_mode || "level"} onChange={(event) => update({ balance_mode: event.target.value })}>
+            <option value="level">Nivel de dupla</option>
+            <option value="seed">Orden de inscripción</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="setup-category-grid">
+        {categories.map((category) => {
+          const minimumTurns = category.courtsPerRound ? category.roundCount : 0;
+          const capacityOk = !minimumTurns || availableTurns >= minimumTurns;
+          return (
+            <article className={capacityOk ? "ok" : "warning"} key={category.category}>
+              <strong>{category.category}</strong>
+              <span>{category.pairCount} parejas · {category.totalMatches} cruces</span>
+              <small>{category.roundCount} rondas · {category.courtsPerRound} canchas simultáneas · nivel {pairLevelLabel(category.minLevel)}-{pairLevelLabel(category.maxLevel)}</small>
+            </article>
+          );
+        })}
+      </div>
+
+      {format === "americano_inteligente" && (
+        <AmericanoInteligentePanel
+          pairs={pairs}
+          registrations={registrations}
+          fixtureForm={fixtureForm}
+          fixtureTiming={fixtureTiming}
+          configuredCourts={configuredCourts}
+        />
+      )}
+    </section>
+  );
+}
+
+function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configuredCourts }) {
+  const fixedPairs = useMemo(() => americanoFixedPairs(pairs), [pairs]);
+  const courts = useMemo(() => parseCourtList(fixtureForm.courts).slice(0, Math.max(1, Number(configuredCourts || fixtureForm.court_count || 1))), [fixtureForm.courts, fixtureForm.court_count, configuredCourts]);
+  const preview = useMemo(() => generateFixedPairAmericanoFixture({
+    pairs: fixedPairs,
+    startTime: fixtureTiming.fixtureStart || fixtureForm.start_time,
+    endTime: fixtureTiming.eventEnd,
+    matchMinutes: Number(fixtureForm.set_minutes || 20),
+    courts,
+  }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts]);
+  const printableCategories = useMemo(() => (
+    [...new Set(preview.matches.flatMap((match) => [match.pair_one.category, match.pair_two.category]).filter(Boolean))]
+      .sort((left, right) => String(left).localeCompare(String(right), undefined, { numeric: true }))
+  ), [preview.matches]);
+
+  return (
+    <section className="americano-panel">
+      <div className="americano-head">
+        <div>
+          <span>Motor Americano Inteligente</span>
+          <strong>{preview.summary}</strong>
+          <p>Duplas fijas durante todo el evento, descansos rotativos y cruces diversos entre parejas.</p>
+        </div>
+        <div className={preview.warnings.length ? "setup-pill warning" : "setup-pill ok"}>
+          {preview.warnings.length ? `${preview.warnings.length} ajuste${preview.warnings.length === 1 ? "" : "s"}` : "Listo para simular"}
+        </div>
+      </div>
+
+      <div className="americano-metrics">
+        <article>
+          <span>Parejas</span>
+          <strong>{fixedPairs.length}</strong>
+          <small>{preview.restPerRound} pareja{preview.restPerRound === 1 ? "" : "s"} descansan por ronda</small>
+        </article>
+        <article>
+          <span>Rondas útiles</span>
+          <strong>{preview.rounds.length}</strong>
+          <small>{preview.timeWindow}</small>
+        </article>
+        <article>
+          <span>Partidos</span>
+          <strong>{preview.matches.length}</strong>
+          <small>{preview.matchesPerPairRange}</small>
+        </article>
+        <article>
+          <span>Diversidad</span>
+          <strong>{preview.repeatSummary}</strong>
+          <small>Cruces repetidos entre duplas</small>
+        </article>
+      </div>
+
+      {preview.warnings.length > 0 && (
+        <div className="americano-warnings">
+          {preview.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+        </div>
+      )}
+
+      {printableCategories.length > 0 && (
+        <div className="americano-print-actions">
+          <span>Imprimir programación</span>
+          {printableCategories.map((category) => (
+            <button
+              type="button"
+              className="secondary-action"
+              key={`print-${category}`}
+              onClick={() => printAmericanoCategory(category, preview)}
+            >
+              Imprimir {category}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="americano-rounds">
+        {preview.rounds.length ? preview.rounds.map((round) => (
+          <article className="americano-round" key={`americano-r${round.round}`}>
+            <header>
+              <strong>R{round.round}</strong>
+              <span>{round.start_time}-{round.end_time}</span>
+              {round.resting.length > 0 && <small>Descansan: {round.resting.map((pair) => pair.shortName).join(", ")}</small>}
+            </header>
+            <div className="americano-match-grid">
+              {round.matches.map((match) => (
+                <div className="americano-match" key={`americano-r${round.round}-c${match.court}`}>
+                  <span>Cancha {match.court}</span>
+                  <AmericanoPairPill pair={match.pair_one} />
+                  <b>vs</b>
+                  <AmericanoPairPill pair={match.pair_two} />
+                </div>
+              ))}
+            </div>
+          </article>
+        )) : (
+          <p className="empty">Faltan al menos 2 parejas completas para generar un Americano.</p>
+        )}
+      </div>
+
+      {preview.pairStats.length > 0 && (
+        <div className="americano-table-wrap">
+          <table className="americano-table">
+            <thead>
+              <tr>
+                <th>Pareja</th>
+                <th>Categoría</th>
+                <th>Partidos</th>
+                <th>Descansos</th>
+                <th>Rivales</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.pairStats.map((stat) => (
+                <tr key={stat.id}>
+                  <td>{stat.name}</td>
+                  <td>{stat.category}</td>
+                  <td>{stat.matches}</td>
+                  <td>{stat.rests}</td>
+                  <td>{stat.rivals}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="americano-note">Preview local: este formato ya respeta parejas fijas; el siguiente paso es guardar estos cruces como partidos reales.</p>
+    </section>
+  );
+}
+
+function AmericanoPairPill({ pair }) {
+  return (
+    <div className="americano-pair-pill" style={{ "--pair-bg": pair.color }}>
+      <strong>{pair.shortName}</strong>
+      <small>{pair.category}</small>
+    </div>
+  );
+}
+
+function htmlEscape(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function printAmericanoCategory(category, preview) {
+  const categoryRounds = preview.rounds
+    .map((round) => ({
+      ...round,
+      matches: round.matches.filter((match) => match.pair_one.category === category || match.pair_two.category === category),
+      resting: round.resting.filter((pair) => pair.category === category),
+    }))
+    .filter((round) => round.matches.length || round.resting.length);
+  const categoryMatchCount = categoryRounds.reduce((sum, round) => sum + round.matches.length, 0);
+  const maxMatchesInRound = Math.max(1, ...categoryRounds.map((round) => round.matches.length));
+  const printColumns = Math.min(5, Math.max(2, maxMatchesInRound));
+  const densityClass = categoryMatchCount > 24 ? "dense" : categoryMatchCount > 15 ? "compact" : "";
+
+  const rows = categoryRounds.map((round) => `
+    <section class="round">
+      <header>
+        <strong>R${round.round}</strong>
+        <span>${htmlEscape(round.start_time)}-${htmlEscape(round.end_time)}</span>
+        ${round.resting.length ? `<small>Descansan: ${round.resting.map((pair) => htmlEscape(pair.shortName)).join(", ")}</small>` : ""}
+      </header>
+      <div class="matches">
+        ${round.matches.map((match) => `
+          <article class="match">
+            <span>Cancha ${htmlEscape(match.court)}</span>
+            <div class="score-line">
+              <div class="pair" style="background:${htmlEscape(match.pair_one.color)}">${htmlEscape(match.pair_one.shortName)}</div>
+              <i></i>
+            </div>
+            <b>vs</b>
+            <div class="score-line">
+              <div class="pair" style="background:${htmlEscape(match.pair_two.color)}">${htmlEscape(match.pair_two.shortName)}</div>
+              <i></i>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `).join("");
+
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) {
+    window.print();
+    return;
+  }
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>Programación ${htmlEscape(category)}</title>
+        <style>
+          @page { size: A4 landscape; margin: 7mm; }
+          * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          body { --print-cols: ${printColumns}; color: #08223b; font-family: Arial, sans-serif; margin: 14px; }
+          h1 { font-size: 21px; margin: 0 0 3px; }
+          .subtitle { color: #526670; font-size: 12px; font-weight: 700; margin: 0 0 10px; }
+          .round { border: 1px solid #c7d9e4; border-radius: 7px; margin-bottom: 7px; padding: 7px; break-inside: avoid; }
+          .round header { align-items: center; border-bottom: 1px solid #d9e8f0; display: grid; gap: 8px; grid-template-columns: 42px 92px 1fr; margin-bottom: 6px; padding-bottom: 5px; }
+          .round header strong { font-size: 16px; }
+          .round header span, .round header small { color: #526670; font-size: 11px; font-weight: 800; }
+          .matches { display: grid; gap: 6px; grid-template-columns: repeat(var(--print-cols), minmax(0, 1fr)); }
+          .match { background: #f4fbff; border-left: 4px solid #13a66f; border-radius: 7px; display: grid; gap: 4px; padding: 6px; }
+          .match span { color: #0e5d8f; font-size: 10px; font-weight: 900; text-transform: uppercase; }
+          .match b { color: #526670; font-size: 10px; text-transform: uppercase; }
+          .pair { border: 1px solid rgba(8, 34, 59, 0.14); border-radius: 6px; font-size: 11px; font-weight: 800; line-height: 1.1; min-height: 30px; padding: 5px; }
+          .score-line { align-items: stretch; display: grid; gap: 5px; grid-template-columns: minmax(0, 1fr) 34px; }
+          .score-line i { background: #ffffff; border: 2px solid #08223b; border-radius: 6px; display: block; min-height: 30px; }
+          body.compact h1 { font-size: 18px; }
+          body.compact .subtitle { margin-bottom: 7px; }
+          body.compact .round { margin-bottom: 5px; padding: 5px; }
+          body.compact .round header { margin-bottom: 4px; padding-bottom: 4px; }
+          body.compact .pair { font-size: 10px; min-height: 26px; padding: 4px; }
+          body.compact .score-line { grid-template-columns: minmax(0, 1fr) 30px; }
+          body.compact .score-line i { min-height: 26px; }
+          body.dense h1 { font-size: 16px; }
+          body.dense .subtitle { font-size: 10px; margin-bottom: 5px; }
+          body.dense .round { margin-bottom: 4px; padding: 4px; }
+          body.dense .round header { grid-template-columns: 34px 78px 1fr; gap: 5px; margin-bottom: 3px; padding-bottom: 3px; }
+          body.dense .round header strong { font-size: 13px; }
+          body.dense .round header span, body.dense .round header small { font-size: 9px; }
+          body.dense .matches { gap: 4px; }
+          body.dense .match { gap: 2px; padding: 4px; }
+          body.dense .match span, body.dense .match b { font-size: 8px; }
+          body.dense .pair { font-size: 9px; min-height: 22px; padding: 3px; }
+          body.dense .score-line { gap: 3px; grid-template-columns: minmax(0, 1fr) 24px; }
+          body.dense .score-line i { border-width: 1.5px; min-height: 22px; }
+          @media print {
+            body { margin: 0; }
+          }
+        </style>
+      </head>
+      <body class="${densityClass}">
+        <h1>Programación ${htmlEscape(category)}</h1>
+        <p class="subtitle">${htmlEscape(preview.timeWindow)} · ${categoryMatchCount} partidos</p>
+        ${rows || "<p>No hay partidos para esta categoría.</p>"}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
+function organizationCategories(pairs, registrations = []) {
+  return [...new Set([
+    ...pairs.map((pair) => pair.category),
+    ...registrations.map((registration) => registration.category),
+  ].filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+}
+
+function pairPayments(payments, pairId) {
+  return payments.filter((payment) => payment.pair_id === pairId);
+}
+
+function pairPaymentState(payments, pairId) {
+  const related = pairPayments(payments, pairId);
+  if (!related.length) return { label: "Sin pago", state: "warning" };
+  if (related.every((payment) => payment.status === "pagado")) return { label: "Pago ok", state: "ok" };
+  if (related.some((payment) => payment.status === "abonado")) return { label: "Pago abonado", state: "watch" };
+  return { label: "Pago pendiente", state: "warning" };
+}
+
+function pairCheckInState(registrations, pairId) {
+  const related = registrations.filter((registration) => registration.pair_id === pairId && registration.status !== "lista_espera" && registration.status !== "cancelada");
+  if (!related.length) return { label: "Sin check-in", state: "warning", checked: 0, total: 0 };
+  const checked = related.filter((registration) => registration.checked_in).length;
+  if (checked === related.length) return { label: "Check-in ok", state: "ok", checked, total: related.length };
+  if (checked > 0) return { label: `Check-in falta ${related.length - checked}`, state: "watch", checked, total: related.length };
+  return { label: "Check-in pendiente", state: "warning", checked, total: related.length };
+}
+
+function organizationReadinessData({ pairs, payments, registrations, matches }) {
+  const categories = organizationCategories(pairs, registrations);
+  const completePairs = pairs.filter((pair) => pair.status === "completa" && pair.player_two_id);
+  const incompletePairs = pairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id);
+  const waitlistPairs = pairs.filter((pair) => pair.status === "lista_espera");
+  const missingLevels = completePairs.filter((pair) => !pair.skill_level);
+  const unpaidPairs = completePairs.filter((pair) => pairPaymentState(payments, pair.id).state !== "ok");
+  const uncheckedPairs = completePairs.filter((pair) => pairCheckInState(registrations, pair.id).state !== "ok");
+  const duplicatePlayers = [];
+  const playerUsage = new Map();
+
+  pairs.forEach((pair) => {
+    [pair.player_one_id, pair.player_two_id].filter(Boolean).forEach((playerId) => {
+      playerUsage.set(playerId, [...(playerUsage.get(playerId) || []), pair]);
+    });
+  });
+  playerUsage.forEach((usedPairs) => {
+    if (usedPairs.length > 1) duplicatePlayers.push(usedPairs);
+  });
+
+  const categoryStats = categories.map((category) => {
+    const categoryPairs = pairs.filter((pair) => pair.category === category);
+    const categoryComplete = categoryPairs.filter((pair) => pair.status === "completa" && pair.player_two_id);
+    const categoryMatches = matches.filter((match) => {
+      const one = pairs.find((pair) => pair.id === match.pair_one_id);
+      const two = pairs.find((pair) => pair.id === match.pair_two_id);
+      return one?.category === category || two?.category === category;
+    });
+    return {
+      category,
+      complete: categoryComplete.length,
+      incomplete: categoryPairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id).length,
+      waitlist: categoryPairs.filter((pair) => pair.status === "lista_espera").length,
+      matches: categoryMatches.length,
+      odd: categoryComplete.length % 2 !== 0,
+    };
+  });
+
+  const alerts = [
+    ...incompletePairs.map((pair) => ({ tone: "warning", text: `${pairName(pair)} sigue buscando partner.` })),
+    ...unpaidPairs.map((pair) => ({ tone: "warning", text: `${pairName(pair)} tiene pago pendiente.` })),
+    ...uncheckedPairs.map((pair) => ({ tone: "info", text: `${pairName(pair)} no tiene check-in completo.` })),
+    ...missingLevels.map((pair) => ({ tone: "warning", text: `${pairName(pair)} no tiene nivel definido.` })),
+    ...categoryStats.filter((item) => item.odd).map((item) => ({ tone: "warning", text: `${item.category} tiene número impar de parejas completas.` })),
+    ...duplicatePlayers.map((usedPairs) => ({ tone: "danger", text: `Jugador duplicado en ${usedPairs.map((pair) => pairName(pair)).join(" y ")}.` })),
+  ];
+
+  return {
+    alerts,
+    categoryStats,
+    ready: !incompletePairs.length && !unpaidPairs.length && !uncheckedPairs.length && !missingLevels.length && !duplicatePlayers.length,
+    totals: {
+      complete: completePairs.length,
+      incomplete: incompletePairs.length,
+      waitlist: waitlistPairs.length,
+      unpaid: unpaidPairs.length,
+      unchecked: uncheckedPairs.length,
+    },
+  };
+}
+
+function OrganizationReadiness({ pairs, payments, registrations, matches }) {
+  const data = organizationReadinessData({ pairs, payments, registrations, matches });
+
+  return (
+    <section className="organization-readiness">
+      <div className={`readiness-main ${data.ready ? "ok" : "watch"}`}>
+        <div>
+          <span>Preparación</span>
+          <strong>{data.ready ? "Listo para programar" : "Pendientes antes de jugar"}</strong>
+          <p>{data.totals.complete} completas · {data.totals.incomplete} incompletas · {data.totals.unpaid} pagos · {data.totals.unchecked} check-in</p>
+        </div>
+      </div>
+      <div className="category-readiness-grid">
+        {data.categoryStats.map((item) => (
+          <article className={item.odd ? "warning" : "ok"} key={item.category}>
+            <strong>{item.category}</strong>
+            <span>{item.complete} parejas completas</span>
+            <small>{item.incomplete} buscando · {item.waitlist} espera · {item.matches} partidos</small>
+          </article>
+        ))}
+      </div>
+      <div className="organization-alerts">
+        {data.alerts.length ? data.alerts.slice(0, 8).map((alert) => (
+          <p className={alert.tone} key={alert.text}>{alert.text}</p>
+        )) : (
+          <p className="ok">Sin alertas de organización.</p>
+        )}
+        {data.alerts.length > 8 && <p className="info">{data.alerts.length - 8} alertas más.</p>}
+      </div>
+    </section>
+  );
+}
+
 function CheckInBlock({ registrations, selectedEventId, onUpdateRegistration }) {
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleRegistrations = normalizedQuery
-    ? registrations.filter((registration) => (
+  const categories = organizationCategories([], registrations);
+  const activeRegistrations = registrations.filter((registration) => registration.status !== "lista_espera" && registration.status !== "cancelada");
+  const visibleRegistrations = activeRegistrations.filter((registration) => (
+    (categoryFilter === "all" || registration.category === categoryFilter)
+    && (statusFilter === "all" || (statusFilter === "checked" ? registration.checked_in : !registration.checked_in))
+    && (!normalizedQuery || (
       registration.player.name.toLowerCase().includes(normalizedQuery)
       || pairName(registration.pair).toLowerCase().includes(normalizedQuery)
       || registration.category.toLowerCase().includes(normalizedQuery)
     ))
-    : registrations;
+  ));
+  const presentCount = activeRegistrations.filter((registration) => registration.checked_in).length;
 
   if (!selectedEventId) return null;
 
@@ -2716,7 +3207,28 @@ function CheckInBlock({ registrations, selectedEventId, onUpdateRegistration }) 
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <span>{registrations.filter((registration) => registration.checked_in).length}/{registrations.length} presentes</span>
+        <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+          <option value="all">Todas las categorías</option>
+          {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <option value="pending">Pendientes</option>
+          <option value="checked">Presentes</option>
+          <option value="all">Todos</option>
+        </select>
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={!visibleRegistrations.length}
+          onClick={async () => {
+            for (const registration of visibleRegistrations) {
+              if (!registration.checked_in) await onUpdateRegistration(registration.id, { checked_in: true });
+            }
+          }}
+        >
+          Marcar visibles
+        </button>
+        <span>{presentCount}/{activeRegistrations.length} presentes</span>
       </div>
       <div className="checkin-list">
         {visibleRegistrations.length ? visibleRegistrations.map((registration) => (
@@ -2737,6 +3249,81 @@ function CheckInBlock({ registrations, selectedEventId, onUpdateRegistration }) 
         )}
       </div>
     </details>
+  );
+}
+
+function PartnerMatchingBlock({ pairs, participantOptions, eventId, onChange }) {
+  const openPairs = pairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id);
+  const completePairs = pairs.filter((pair) => pair.status === "completa" && pair.player_two_id);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const categories = organizationCategories(pairs);
+  const visibleOpenPairs = openPairs.filter((pair) => categoryFilter === "all" || pair.category === categoryFilter);
+
+  if (!openPairs.length) return null;
+
+  function candidateScore(openPair, option) {
+    const existingPair = pairs.find((pair) => `player:${pair.player_one_id}` === option.value || `player:${pair.player_two_id}` === option.value);
+    const sameCategory = existingPair?.category === openPair.category || option.category === openPair.category;
+    const levelDiff = existingPair?.skill_level ? Math.abs(Number(existingPair.skill_level || 5) - Number(openPair.skill_level || 5)) : 1;
+    return (sameCategory ? 0 : 10) + levelDiff;
+  }
+
+  return (
+    <article className="data-block partner-matching">
+      <div className="block-head">
+        <h3><Users size={16} /> Match de partners</h3>
+        <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+          <option value="all">Todas</option>
+          {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
+      </div>
+      <div className="partner-match-list">
+        {visibleOpenPairs.map((pair) => {
+          const options = participantOptions
+            .filter((option) => option.value !== `player:${pair.player_one_id}`)
+            .filter((option) => !completePairs.some((completePair) => (
+              `player:${completePair.player_one_id}` === option.value
+              || `player:${completePair.player_two_id}` === option.value
+            )))
+            .sort((left, right) => candidateScore(pair, left) - candidateScore(pair, right))
+            .slice(0, 5);
+
+          return (
+            <section className="partner-match-row" key={pair.id}>
+              <div>
+                <strong>{pairName(pair)}</strong>
+                <span>{pair.category} · {pairLevelLabel(pair.skill_level)}</span>
+              </div>
+              <div className="partner-candidates">
+                {options.length ? options.map((option) => (
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    key={`${pair.id}-${option.value}`}
+                    onClick={() => onChange(async () => {
+                      const playerTwoId = await resolveParticipantPlayerId(option.value, participantOptions, pair.category);
+                      const sourceOpenPair = openPairs.find((openPair) => (
+                        openPair.id !== pair.id
+                        && (`player:${openPair.player_one_id}` === option.value || `player:${openPair.player_two_id}` === option.value)
+                      ));
+                      await api.updatePair(eventId, pair.id, {
+                        player_two_id: playerTwoId,
+                        status: "completa",
+                      });
+                      if (sourceOpenPair) await api.deletePair(eventId, sourceOpenPair.id);
+                    })}
+                  >
+                    {option.name}
+                  </button>
+                )) : (
+                  <span className="muted">Sin candidatos disponibles.</span>
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </article>
   );
 }
 
@@ -3013,35 +3600,7 @@ function EventCategorySelect({ value, onChange }) {
   );
 }
 
-function summarizeConfigCategories(configs) {
-  const categories = configs.map((config) => config.category).filter(Boolean);
-  return categories.length ? [...new Set(categories)].join(" / ") : "";
-}
-
 function EventForm({ form, setForm, onSubmit, isEditing }) {
-  function updateCategoryConfig(index, patch) {
-    const configs = [...(form.category_configs || [])];
-    configs[index] = { ...configs[index], ...patch };
-    setForm({
-      ...form,
-      categories: summarizeConfigCategories(configs),
-      category_configs: configs,
-    });
-  }
-
-  function addCategoryConfig(config = defaultCategoryConfig) {
-    setForm({ ...form, category_configs: [...(form.category_configs || []), { ...config }] });
-  }
-
-  function removeCategoryConfig(index) {
-    const configs = (form.category_configs || []).filter((_, itemIndex) => itemIndex !== index);
-    setForm({
-      ...form,
-      categories: summarizeConfigCategories(configs),
-      category_configs: configs,
-    });
-  }
-
   return (
     <div className="data-block">
       <h3><CalendarPlus size={16} /> {isEditing ? "Editar evento" : "Crear evento"}</h3>
@@ -3073,9 +3632,9 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <small>Total máximo de jugadores/inscritos.</small>
         </label>
         <label className="form-field">
-          <span>Tipo de torneo</span>
-          <input placeholder="Americano, grupos, ranking..." value={form.tournament_type} onChange={(e) => setForm({ ...form, tournament_type: e.target.value })} required />
-          <small>Descripción interna del formato general.</small>
+          <span>Categorías</span>
+          <input placeholder="5taD+ / 4taC+" value={form.categories} onChange={(e) => setForm({ ...form, categories: e.target.value })} required />
+          <small>Categorías disponibles para inscripción.</small>
         </label>
         <label className="form-field">
           <span>Estado operativo</span>
@@ -3095,82 +3654,6 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
             <small>Aparece en Registro, Resultados y selectores. Los eventos nuevos quedan activos por defecto.</small>
           </span>
         </label>
-        <div className="category-configs">
-          <div className="block-head">
-            <div>
-              <h3>Modalidad por categoría</h3>
-              <p className="field-help">Define cómo se arma y calcula cada categoría dentro del mismo evento.</p>
-            </div>
-            <button type="button" className="secondary-action" onClick={() => setForm({ ...form, category_configs: amarTodayCategoryConfigs.map((config) => ({ ...config })) })}>
-              Usar formato AMAR hoy
-            </button>
-          </div>
-          {(form.category_configs || []).length ? (
-            <div className="category-config-list">
-              {form.category_configs.map((config, index) => (
-                <div className="category-config-row" key={`${config.category}-${index}`}>
-                  <label className="form-field compact">
-                    <span>Categoría</span>
-                    <EventCategorySelect
-                      value={config.category}
-                      onChange={(category) => updateCategoryConfig(index, { category })}
-                    />
-                  </label>
-                  <label className="form-field compact">
-                    <span>Modalidad</span>
-                    <select value={config.modality} onChange={(e) => updateCategoryConfig(index, { modality: e.target.value })}>
-                      {modalityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                  </label>
-                  <label className="form-field compact">
-                    <span>Parejas/grupo</span>
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="6"
-                      value={config.group_size}
-                      onChange={(e) => updateCategoryConfig(index, { group_size: e.target.value })}
-                    />
-                  </label>
-                  <label className="form-field compact">
-                    <span>Partidos garantizados</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="5"
-                      value={config.guaranteed_matches}
-                      onChange={(e) => updateCategoryConfig(index, { guaranteed_matches: e.target.value })}
-                    />
-                  </label>
-                  <label className="form-field compact">
-                    <span>Clasifican/grupo</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="1"
-                      value={config.qualifiers_per_group}
-                      onChange={(e) => updateCategoryConfig(index, { qualifiers_per_group: e.target.value })}
-                    />
-                  </label>
-                  <label className="form-field compact">
-                    <span>Notas</span>
-                    <input
-                      placeholder="Regla o comentario"
-                      value={config.notes || ""}
-                      onChange={(e) => updateCategoryConfig(index, { notes: e.target.value })}
-                    />
-                  </label>
-                  <button type="button" className="danger-action" onClick={() => removeCategoryConfig(index)}>Quitar</button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">Sin modalidades configuradas por categoría.</p>
-          )}
-          <button type="button" className="secondary-action" onClick={() => addCategoryConfig()}>
-            Agregar modalidad
-          </button>
-        </div>
         <label className="form-field wide-field">
           <span>Descripción</span>
           <textarea placeholder="Notas internas, origen de datos o instrucciones del evento" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
@@ -3859,28 +4342,40 @@ function CategorySelect({ value, onChange }) {
 }
 
 function pairLevelStyle(level) {
-  const normalized = Math.min(10, Math.max(1, Number(level || 5)));
+  const tone = pairLevelTone(level);
   const palette = {
-    1: ["#e9f4fb", "#0e5d8f"],
-    2: ["#d8eff8", "#075f86"],
-    3: ["#d9f5ea", "#0a6f54"],
-    4: ["#e8f8d8", "#4d7c0f"],
-    5: ["#fff6c7", "#8a6500"],
-    6: ["#ffe8bd", "#9a5400"],
-    7: ["#ffd9c8", "#a43a16"],
-    8: ["#ffd5dd", "#a01743"],
-    9: ["#eadcff", "#6231a6"],
-    10: ["#d9ddff", "#263a9a"],
+    low: ["#e8f8d8", "#4d7c0f"],
+    mid: ["#fff6c7", "#8a6500"],
+    high: ["#ffd5dd", "#a01743"],
   };
-  const [background, color] = palette[normalized];
+  const [background, color] = palette[tone];
   return { "--level-bg": background, "--level-color": color };
 }
 
-function PairLevelBadge({ level, compact = false }) {
-  const normalized = Math.min(10, Math.max(1, Number(level || 5)));
+function pairLevelTone(level) {
+  const normalized = Number(level || 6);
+  if (normalized <= 4) return "low";
+  if (normalized >= 8) return "high";
+  return "mid";
+}
+
+function pairLevelLabel(level) {
+  return pairLevelOptions.find((option) => option.tone === pairLevelTone(level))?.label || "Medio";
+}
+
+function PairLevelSelect({ value, onChange }) {
+  const normalized = pairLevelOptions.find((option) => option.tone === pairLevelTone(value))?.value || 6;
   return (
-    <span className={`pair-level-badge ${compact ? "compact" : ""}`} style={pairLevelStyle(normalized)}>
-      N{normalized}
+    <select className={`pair-level-select ${pairLevelTone(normalized)}`} value={normalized} onChange={(event) => onChange(Number(event.target.value))}>
+      {pairLevelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+  );
+}
+
+function PairLevelBadge({ level, compact = false }) {
+  return (
+    <span className={`pair-level-badge ${compact ? "compact" : ""}`} style={pairLevelStyle(level)}>
+      {pairLevelLabel(level)}
     </span>
   );
 }
@@ -3894,27 +4389,204 @@ function DataBlock({ title, rows }) {
   );
 }
 
-function PairsBlock({ pairs, participantOptions, eventId, onChange, confirmAction }) {
-  const completePairs = pairs.filter((pair) => pair.status === "completa");
-  const searchingPairs = pairs.filter((pair) => pair.status === "buscando_partner");
-  const waitlistPairs = pairs.filter((pair) => pair.status === "lista_espera");
+function PairsBlock({ pairs, participantOptions, payments = [], registrations = [], eventId, onChange, confirmAction }) {
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [showAddPair, setShowAddPair] = useState(false);
+  const [addPairMode, setAddPairMode] = useState("registered");
+  const [newPair, setNewPair] = useState({
+    player_one_id: "",
+    player_two_id: "",
+    player_one_name: "",
+    player_one_phone: "",
+    player_two_name: "",
+    player_two_phone: "",
+    category: "",
+    skill_level: "6",
+    status: "completa",
+  });
+  const normalizedQuery = query.trim().toLowerCase();
+  const categories = organizationCategories(pairs);
+  const defaultNewPairCategory = newPair.category || categories[0] || "5taD+";
+  const filteredPairs = pairs.filter((pair) => (
+    (categoryFilter === "all" || pair.category === categoryFilter)
+    && (statusFilter === "all" || pair.status === statusFilter)
+    && (!normalizedQuery || pairName(pair).toLowerCase().includes(normalizedQuery))
+  ));
+  const completePairs = filteredPairs.filter((pair) => pair.status === "completa");
+  const searchingPairs = filteredPairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id);
+  const waitlistPairs = filteredPairs.filter((pair) => pair.status === "lista_espera");
   const sections = [
     ["Parejas completas", completePairs],
     ["Buscando partner", searchingPairs],
     ["Lista de espera", waitlistPairs],
   ];
 
+  async function createManualPlayer(name, phone, category) {
+    const player = await api.createPlayer({
+      name: name.trim(),
+      phone: phone.trim() || null,
+      category,
+      preferred_side: "indiferente",
+    });
+    return player.id;
+  }
+
+  async function submitNewPair(event) {
+    event.preventDefault();
+    await onChange(async () => {
+      const category = defaultNewPairCategory;
+      let playerOneId = null;
+      let playerTwoId = null;
+
+      if (addPairMode === "registered") {
+        playerOneId = await resolveParticipantPlayerId(newPair.player_one_id, participantOptions, category);
+        playerTwoId = newPair.player_two_id
+          ? await resolveParticipantPlayerId(newPair.player_two_id, participantOptions, category)
+          : null;
+      } else {
+        playerOneId = await createManualPlayer(newPair.player_one_name, newPair.player_one_phone, category);
+        playerTwoId = newPair.player_two_name.trim()
+          ? await createManualPlayer(newPair.player_two_name, newPair.player_two_phone, category)
+          : null;
+      }
+
+      await api.createPair(eventId, {
+        player_one_id: playerOneId,
+        player_two_id: playerTwoId,
+        category,
+        skill_level: Number(newPair.skill_level || 6),
+        status: playerTwoId ? newPair.status : "buscando_partner",
+      });
+    });
+    setNewPair({
+      player_one_id: "",
+      player_two_id: "",
+      player_one_name: "",
+      player_one_phone: "",
+      player_two_name: "",
+      player_two_phone: "",
+      category: defaultNewPairCategory,
+      skill_level: "6",
+      status: "completa",
+    });
+    setShowAddPair(false);
+  }
+
   return (
     <article className="data-block pairs-block">
       <div className="block-head">
         <h3>Inscritos</h3>
-        <div className="mini-stats">
-          <span>{completePairs.length} completas</span>
-          <span>{searchingPairs.length} buscando</span>
-          <span>{waitlistPairs.length} espera</span>
+        <div className="pairs-head-actions">
+          <div className="mini-stats">
+            <span>{pairs.filter((pair) => pair.status === "completa").length} completas</span>
+            <span>{pairs.filter((pair) => pair.status === "buscando_partner" || !pair.player_two_id).length} buscando</span>
+            <span>{pairs.filter((pair) => pair.status === "lista_espera").length} espera</span>
+          </div>
+          <button type="button" className="secondary-action" onClick={() => setShowAddPair((current) => !current)}>
+            <UserPlus size={16} /> Agregar pareja
+          </button>
         </div>
       </div>
-      {pairs.length ? (
+      {showAddPair && (
+        <form className="pair-create-panel" onSubmit={submitNewPair}>
+          <div className="pair-create-mode">
+            <button
+              type="button"
+              className={addPairMode === "registered" ? "active" : ""}
+              onClick={() => setAddPairMode("registered")}
+            >
+              Inscrita/cuenta
+            </button>
+            <button
+              type="button"
+              className={addPairMode === "manual" ? "active" : ""}
+              onClick={() => setAddPairMode("manual")}
+            >
+              Manual
+            </button>
+          </div>
+          {addPairMode === "registered" ? (
+            <>
+              <label className="form-field">
+                <span>Jugador 1</span>
+                <select value={newPair.player_one_id} onChange={(event) => setNewPair({ ...newPair, player_one_id: event.target.value })} required>
+                  <option value="">Seleccionar</option>
+                  {participantOptions.map((option) => <option key={option.value} value={option.value}>{option.name}{option.kind === "member" ? " · cuenta" : ""}</option>)}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Jugador 2</span>
+                <select value={newPair.player_two_id} onChange={(event) => setNewPair({ ...newPair, player_two_id: event.target.value })}>
+                  <option value="">Sin partner</option>
+                  {participantOptions
+                    .filter((option) => option.value !== newPair.player_one_id)
+                    .map((option) => <option key={option.value} value={option.value}>{option.name}{option.kind === "member" ? " · cuenta" : ""}</option>)}
+                </select>
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="form-field">
+                <span>Jugador 1</span>
+                <input value={newPair.player_one_name} onChange={(event) => setNewPair({ ...newPair, player_one_name: event.target.value })} placeholder="Nombre" required />
+              </label>
+              <label className="form-field">
+                <span>Teléfono 1</span>
+                <input value={newPair.player_one_phone} onChange={(event) => setNewPair({ ...newPair, player_one_phone: event.target.value })} placeholder="+56..." />
+              </label>
+              <label className="form-field">
+                <span>Jugador 2</span>
+                <input value={newPair.player_two_name} onChange={(event) => setNewPair({ ...newPair, player_two_name: event.target.value })} placeholder="Nombre" />
+              </label>
+              <label className="form-field">
+                <span>Teléfono 2</span>
+                <input value={newPair.player_two_phone} onChange={(event) => setNewPair({ ...newPair, player_two_phone: event.target.value })} placeholder="+56..." />
+              </label>
+            </>
+          )}
+          <label className="form-field">
+            <span>Categoría</span>
+            <CategorySelect value={defaultNewPairCategory} onChange={(category) => setNewPair({ ...newPair, category })} />
+          </label>
+          <label className="form-field">
+            <span>Nivel dupla</span>
+            <PairLevelSelect value={newPair.skill_level} onChange={(level) => setNewPair({ ...newPair, skill_level: String(level) })} />
+          </label>
+          <label className="form-field">
+            <span>Estado</span>
+            <select value={newPair.status} onChange={(event) => setNewPair({ ...newPair, status: event.target.value })}>
+              <option value="completa">Completa</option>
+              <option value="buscando_partner">Buscando partner</option>
+              <option value="lista_espera">Lista de espera</option>
+            </select>
+          </label>
+          <button type="submit">
+            <Users size={16} /> Crear pareja
+          </button>
+        </form>
+      )}
+      <div className="pairs-toolbar">
+        <input
+          type="search"
+          placeholder="Buscar pareja"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+          <option value="all">Todas las categorías</option>
+          {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <option value="all">Todos los estados</option>
+          <option value="completa">Completas</option>
+          <option value="buscando_partner">Buscando partner</option>
+          <option value="lista_espera">Lista de espera</option>
+        </select>
+        <span>{filteredPairs.length} visibles</span>
+      </div>
+      {filteredPairs.length ? (
         <div className="pairs-list">
           {sections.map(([title, sectionPairs]) => (
             sectionPairs.length > 0 && (
@@ -3922,6 +4594,10 @@ function PairsBlock({ pairs, participantOptions, eventId, onChange, confirmActio
                 <strong>{title}</strong>
                 {sectionPairs.map((pair) => (
                   <div className="pair-admin-row" key={pair.id}>
+                    <div className="pair-operational-badges">
+                      <span className={pairPaymentState(payments, pair.id).state}>{pairPaymentState(payments, pair.id).label}</span>
+                      <span className={pairCheckInState(registrations, pair.id).state}>{pairCheckInState(registrations, pair.id).label}</span>
+                    </div>
                     <select
                       value={`player:${pair.player_one_id}`}
                       onChange={(event) => onChange(async () => {
@@ -3964,15 +4640,10 @@ function PairsBlock({ pairs, participantOptions, eventId, onChange, confirmActio
                       value={pair.category}
                       onChange={(category) => onChange(() => api.updatePair(eventId, pair.id, { category }))}
                     />
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={pair.skill_level || 5}
-                      title="Nivel dupla"
-                      onChange={(event) => onChange(() => api.updatePair(eventId, pair.id, { skill_level: Number(event.target.value || 5) }))}
+                    <PairLevelSelect
+                      value={pair.skill_level}
+                      onChange={(level) => onChange(() => api.updatePair(eventId, pair.id, { skill_level: level }))}
                     />
-                    <PairLevelBadge level={pair.skill_level} compact />
                     <select
                       value={pair.status}
                       onChange={(event) => onChange(() => api.updatePair(eventId, pair.id, { status: event.target.value }))}
@@ -4005,7 +4676,7 @@ function PairsBlock({ pairs, participantOptions, eventId, onChange, confirmActio
           ))}
         </div>
       ) : (
-        <p className="muted">Sin inscritos</p>
+        <p className="muted">Sin inscritos con esos filtros.</p>
       )}
     </article>
   );
@@ -4258,7 +4929,7 @@ function PairSelect({ label, value, pairs, onChange }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} required>
       <option value="">{label}</option>
-      {pairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)} · N{pair.skill_level || 5}</option>)}
+      {pairs.map((pair) => <option key={pair.id} value={pair.id}>{pairName(pair)} · {pairLevelLabel(pair.skill_level)}</option>)}
     </select>
   );
 }
@@ -4436,6 +5107,173 @@ function plannerSlotGroup(slot, assignments) {
   const oneGroup = getPlannerGroup(assignments, slot.pair_one_id);
   const twoGroup = getPlannerGroup(assignments, slot.pair_two_id);
   return oneGroup && oneGroup === twoGroup ? oneGroup : "";
+}
+
+function americanoFixedPairs(pairs = []) {
+  const colors = [
+    "#e5f6ff",
+    "#e8f8df",
+    "#fff1c7",
+    "#ffe1d6",
+    "#f0e4ff",
+    "#dcf8f3",
+    "#ffe3ef",
+    "#e7ecff",
+    "#f4efd8",
+    "#dff4ea",
+    "#fde7c8",
+    "#e1f1f5",
+  ];
+  return pairs
+    .filter((pair) => pair.status === "completa" && pair.player_two_id)
+    .map((pair) => ({
+      id: String(pair.id),
+      pairId: pair.id,
+      name: pairName(pair),
+      shortName: pairName(pair),
+      category: pair.category || "Sin categoria",
+      level: Number(pair.skill_level || 5),
+    }))
+    .sort((left, right) => (
+      String(left.category).localeCompare(String(right.category), undefined, { numeric: true })
+      || left.level - right.level
+      || left.name.localeCompare(right.name)
+    ))
+    .map((pair, index) => ({
+      ...pair,
+      color: colors[index % colors.length],
+    }));
+}
+
+function americanoPairMatchKey(left, right) {
+  return [left.id, right.id].sort().join("|");
+}
+
+function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, matchMinutes = 20, courts = [] }) {
+  const warnings = [];
+  const usableCourts = courts.length ? courts : ["1"];
+  const start = minutesFromSlot(startTime || "17:00");
+  let end = minutesFromSlot(endTime || "");
+  const validStart = start === 9999 ? 17 * 60 : start;
+  if (end === 9999) {
+    end = validStart + (Number(matchMinutes || 20) * 3);
+    warnings.push("No hay hora de fin configurada; se simulan 3 rondas.");
+  }
+  if (end <= validStart) end += 24 * 60;
+
+  const minutesPerMatch = Math.max(1, Number(matchMinutes || 20));
+  const roundCount = Math.max(0, Math.floor((end - validStart) / minutesPerMatch));
+  const maxCourtsByPairs = Math.max(0, Math.floor(pairs.length / 2));
+  const courtsPerRound = Math.min(usableCourts.length, maxCourtsByPairs);
+  const stats = new Map(pairs.map((pair) => [pair.id, {
+    ...pair,
+    matches: 0,
+    rests: 0,
+    rivalsSet: new Set(),
+  }]));
+  const matchupCounts = new Map();
+  const rounds = [];
+
+  if (pairs.length < 2) warnings.push("Se necesitan al menos 2 parejas completas para armar partidos.");
+  if (pairs.length % 2 !== 0) warnings.push("Una pareja descansará en cada ronda por cantidad impar.");
+  if (usableCourts.length > courtsPerRound && courtsPerRound > 0) warnings.push(`Se usarán ${courtsPerRound} de ${usableCourts.length} canchas por ronda según parejas disponibles.`);
+  Object.entries(pairs.reduce((acc, pair) => {
+    acc[pair.category] = (acc[pair.category] || 0) + 1;
+    return acc;
+  }, {})).forEach(([category, count]) => {
+    if (count === 1) warnings.push(`${category} tiene solo 1 pareja; no puede generar cruces internos.`);
+    else if (count % 2 !== 0) warnings.push(`${category} tiene cantidad impar; una pareja descansará por ronda.`);
+  });
+
+  for (let roundIndex = 0; roundIndex < roundCount && courtsPerRound > 0; roundIndex += 1) {
+    const roundStart = validStart + (roundIndex * minutesPerMatch);
+    const usedThisRound = new Set();
+    const matches = [];
+
+    for (let courtIndex = 0; courtIndex < courtsPerRound; courtIndex += 1) {
+      let best = null;
+      const pool = pairs.filter((pair) => !usedThisRound.has(pair.id));
+      if (pool.length < 2) break;
+
+      pool.forEach((one, oneIndex) => {
+        pool.slice(oneIndex + 1).forEach((two) => {
+          if (one.category !== two.category) return;
+          const oneStats = stats.get(one.id);
+          const twoStats = stats.get(two.id);
+          const key = americanoPairMatchKey(one, two);
+          const score = (
+            ((matchupCounts.get(key) || 0) * 80)
+            + (Math.abs(oneStats.matches - twoStats.matches) * 12)
+            + (Math.abs(oneStats.rests - twoStats.rests) * 3)
+            + (Math.abs(one.level - two.level) * 2)
+            - ((oneStats.rests + twoStats.rests) * 0.5)
+          );
+          if (!best || score < best.score) best = { pair_one: one, pair_two: two, score };
+        });
+      });
+
+      if (!best) break;
+
+      matches.push({
+        round: roundIndex + 1,
+        court: usableCourts[courtIndex],
+        start_time: minutesToTime(roundStart),
+        end_time: minutesToTime(roundStart + minutesPerMatch),
+        pair_one: best.pair_one,
+        pair_two: best.pair_two,
+        locked: false,
+      });
+
+      usedThisRound.add(best.pair_one.id);
+      usedThisRound.add(best.pair_two.id);
+      stats.get(best.pair_one.id).matches += 1;
+      stats.get(best.pair_two.id).matches += 1;
+      stats.get(best.pair_one.id).rivalsSet.add(best.pair_two.id);
+      stats.get(best.pair_two.id).rivalsSet.add(best.pair_one.id);
+      const key = americanoPairMatchKey(best.pair_one, best.pair_two);
+      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
+    }
+
+    const resting = pairs.filter((pair) => !usedThisRound.has(pair.id));
+    resting.forEach((pair) => {
+      stats.get(pair.id).rests += 1;
+    });
+
+    rounds.push({
+      round: roundIndex + 1,
+      start_time: minutesToTime(roundStart),
+      end_time: minutesToTime(roundStart + minutesPerMatch),
+      matches,
+      resting,
+    });
+  }
+
+  const matches = rounds.flatMap((round) => round.matches);
+  const pairStats = [...stats.values()]
+    .map((stat) => ({
+      id: stat.id,
+      name: stat.name,
+      category: stat.category,
+      level: stat.level,
+      matches: stat.matches,
+      rests: stat.rests,
+      rivals: stat.rivalsSet.size,
+    }))
+    .sort((left, right) => right.matches - left.matches || left.rests - right.rests || left.name.localeCompare(right.name));
+  const matchCounts = pairStats.map((stat) => stat.matches);
+  const repeatedMatchups = [...matchupCounts.values()].filter((count) => count > 1).length;
+
+  return {
+    rounds,
+    matches,
+    pairStats,
+    warnings,
+    restPerRound: Math.max(0, pairs.length - (courtsPerRound * 2)),
+    timeWindow: rounds.length ? `${rounds[0].start_time}-${rounds[rounds.length - 1].end_time}` : "Sin horario",
+    summary: `${matches.length} partidos · ${rounds.length} rondas · ${courtsPerRound} cancha${courtsPerRound === 1 ? "" : "s"}`,
+    matchesPerPairRange: matchCounts.length ? `${Math.min(...matchCounts)}-${Math.max(...matchCounts)} por pareja` : "Sin parejas",
+    repeatSummary: `${repeatedMatchups} repetido${repeatedMatchups === 1 ? "" : "s"}`,
+  };
 }
 
 function matchCategoryPlans(pairs) {
@@ -5179,7 +6017,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
                           value={pair.id}
                           disabled={pairUsedElsewhereInRound(round, pair.id, courtIndex, "pair_one_id")}
                         >
-                          {pairName(pair)} · N{pair.skill_level || 5}
+                          {pairName(pair)} · {pairLevelLabel(pair.skill_level)}
                         </option>
                       ))}
                     </select>
@@ -5197,7 +6035,7 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
                           value={pair.id}
                           disabled={pairUsedElsewhereInRound(round, pair.id, courtIndex, "pair_two_id")}
                         >
-                          {pairName(pair)} · N{pair.skill_level || 5}
+                          {pairName(pair)} · {pairLevelLabel(pair.skill_level)}
                         </option>
                       ))}
                     </select>
