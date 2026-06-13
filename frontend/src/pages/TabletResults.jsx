@@ -89,6 +89,21 @@ function scoreState(current) {
   return { tone: "ok", label: left > right ? "Gana pareja 1" : "Gana pareja 2" };
 }
 
+function finalPlanSummary(plan, pairById) {
+  if (plan.type === "placements" && plan.placementMatches?.length) {
+    return "Final, 3er, 5to y 7mo lugar listos";
+  }
+  if (plan.finals?.length) return "Final y 3er lugar listos";
+  if (!plan.semis?.length) return "Esperando resultados";
+  if (plan.type === "three_group_semis") {
+    return plan.semis
+      .map((match) => `Cancha ${match.court}: ${pairName(pairById.get(match.pair_one_id))} vs ${pairName(pairById.get(match.pair_two_id))}`)
+      .join(" · ");
+  }
+  const rows = plan.standingsRows || [];
+  return `${rows[0]?.pair ? pairName(rows[0].pair) : "1"} vs ${rows[3]?.pair ? pairName(rows[3].pair) : "4"} · ${rows[1]?.pair ? pairName(rows[1].pair) : "2"} vs ${rows[2]?.pair ? pairName(rows[2].pair) : "3"}`;
+}
+
 export function TabletResults({
   events,
   pairs,
@@ -283,15 +298,7 @@ export function TabletResults({
                 <strong>{plan.category}</strong>
                 <span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span>
               </div>
-              <p>
-                {plan.type === "placements" && plan.placementMatches?.length
-                  ? "Final, 3er, 5to y 7mo lugar listos"
-                  : plan.semis?.length
-                  ? `${plan.standingsRows[0]?.pair ? pairName(plan.standingsRows[0].pair) : "1"} vs ${plan.standingsRows[3]?.pair ? pairName(plan.standingsRows[3].pair) : "4"} · ${plan.standingsRows[1]?.pair ? pairName(plan.standingsRows[1].pair) : "2"} vs ${plan.standingsRows[2]?.pair ? pairName(plan.standingsRows[2].pair) : "3"}`
-                  : plan.finals?.length
-                    ? "Final y 3er lugar listos"
-                    : "Esperando resultados"}
-              </p>
+              <p>{finalPlanSummary(plan, pairById)}</p>
               <div className="tablet-dynamic-actions">
                 <button
                   type="button"

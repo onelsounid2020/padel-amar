@@ -4408,6 +4408,38 @@ h3 {
   overflow: hidden;
 }
 
+.ranking-formula {
+  background: #f3fbef;
+  border: 1px solid #d7e9cb;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.ranking-formula strong {
+  color: #08223b;
+}
+
+.ranking-formula span {
+  color: #0e5d8f;
+  font-weight: 900;
+}
+
+.ranking-formula small {
+  color: #496779;
+}
+
+.results-ranking-scroll {
+  overflow-x: auto;
+}
+
+.ranking-row.results-ranking-row {
+  grid-template-columns: 42px minmax(190px, 1fr) repeat(8, 54px);
+  min-width: 760px;
+}
+
 .post-event-summary {
   background: #fffefa;
   border: 1px solid #c7d9e4;

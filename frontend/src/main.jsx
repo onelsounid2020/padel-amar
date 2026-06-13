@@ -2167,6 +2167,11 @@ function PublicResults({ events, pairs, matches, resultSubmissions, standings, a
     groups[category] = [...(groups[category] || []), standing];
     return groups;
   }, {});
+  const rankingConfig = { ...defaultRankingConfig, ...(selectedEvent?.ranking_config || {}) };
+  const tiebreakerLabels = Object.fromEntries(rankingTiebreakerOptions.map((option) => [option.value, option.label]));
+  const tiebreakers = (rankingConfig.tiebreakers || defaultRankingConfig.tiebreakers)
+    .map((criterion) => tiebreakerLabels[criterion])
+    .filter(Boolean);
 
   return (
     <section className="public-page">
@@ -2281,32 +2286,52 @@ function PublicResults({ events, pairs, matches, resultSubmissions, standings, a
 
       <section className="panel">
         <h2><Medal size={18} /> Ranking por categoría</h2>
+        <div className="ranking-formula" aria-label="Fórmula del ranking">
+          <strong>Fórmula de puntos</strong>
+          <span>
+            Pts = G × {rankingConfig.win_points} + E × {rankingConfig.draw_points} + P × {rankingConfig.loss_points}
+          </span>
+          <small>Desempates: {tiebreakers.join(" → ") || "Sin criterios configurados"}.</small>
+        </div>
         <div className="ranking-grid">
           {Object.entries(standingsByCategory).length ? (
             Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
-              <article className="ranking-table" key={category}>
+              <article className="ranking-table results-ranking-table" key={category}>
                 <div className="ranking-title">
                   <strong>{category}</strong>
                   <span>{categoryStandings.length} parejas</span>
                 </div>
-                <div className="ranking-row ranking-header">
-                  <span>#</span>
-                  <span>Pareja</span>
-                  <span>J</span>
-                  <span>G</span>
-                  <span>Pts</span>
-                  <span>Dif</span>
-                </div>
-                {categoryStandings.map((standing) => (
-                  <div className="ranking-row" key={standing.id}>
-                    <span>{standing.position}</span>
-                    <span>{pairName(standing.pair)}</span>
-                    <span>{standing.played}</span>
-                    <span>{standing.won}</span>
-                    <span>{standing.points}</span>
-                    <span>{standing.points_for - standing.points_against}</span>
+                <div className="results-ranking-scroll">
+                  <div className="ranking-row results-ranking-row ranking-header">
+                    <span>#</span>
+                    <span>Pareja</span>
+                    <span title="Partidos jugados">J</span>
+                    <span title="Partidos ganados">G</span>
+                    <span title="Partidos empatados">E</span>
+                    <span title="Partidos perdidos">P</span>
+                    <span title="Puntos a favor">PF</span>
+                    <span title="Puntos en contra">PC</span>
+                    <span title="Diferencia entre puntos a favor y en contra">Dif</span>
+                    <span title="Puntos de ranking">Pts</span>
                   </div>
-                ))}
+                  {categoryStandings.map((standing) => {
+                    const draws = standing.played - standing.won - standing.lost;
+                    return (
+                      <div className="ranking-row results-ranking-row" key={standing.id}>
+                        <span>{standing.position}</span>
+                        <span>{pairName(standing.pair)}</span>
+                        <span>{standing.played}</span>
+                        <span>{standing.won}</span>
+                        <span>{draws}</span>
+                        <span>{standing.lost}</span>
+                        <span>{standing.points_for}</span>
+                        <span>{standing.points_against}</span>
+                        <span>{standing.points_for - standing.points_against}</span>
+                        <span><strong>{standing.points}</strong></span>
+                      </div>
+                    );
+                  })}
+                </div>
               </article>
             ))
           ) : (
@@ -2602,6 +2627,14 @@ function EventsPage(props) {
                   />
                   <RankingBlock ranking={ranking} standings={standings} />
                 </div>
+                <DynamicFourPairFinals
+                  matches={matches}
+                  pairs={pairs}
+                  standings={standings}
+                  eventId={selectedEventId}
+                  fixtureForm={fixtureForm}
+                  onChange={run}
+                />
                 <PostEventSummary
                   event={selectedEvent}
                   standings={standings}
@@ -6082,7 +6115,54 @@ function DynamicFourPairFinals({ matches, pairs, standings, eventId, fixtureForm
               <strong>{plan.category}</strong>
               <span>{plan.allGroupResults ? "ranking listo" : `${plan.finishedGroupMatches}/${plan.totalGroupMatches} resultados fase`}</span>
             </div>
-            {plan.type === "placements" ? (
+            {plan.type === "three_group_semis" ? (
+              <>
+                <div className="qualifier-grid">
+                  {plan.groupPlans.map((group) => (
+                    <div className="qualifier-card" key={`${plan.category}-${group.groupName}`}>
+                      <span>{group.groupName}</span>
+                      <strong>{group.finishedMatches}/{group.totalMatches} resultados</strong>
+                      <ol>
+                        {group.standings.map((standing, index) => (
+                          <li key={standing.pair.id}>
+                            {index + 1}. {pairName(standing.pair)} <b>{standing.points} pts</b>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ))}
+                  <div className="dynamic-court-card">
+                    <span>Semifinales · {plan.semiTime}</span>
+                    <strong>{plan.allGroupResults ? "Cruces definidos" : "Esperando las tres rondas"}</strong>
+                    <p>
+                      Cancha {plan.semis[0]?.court || "1"}: {plan.semis[0]
+                        ? `${pairName(pairById.get(plan.semis[0].pair_one_id))} vs ${pairName(pairById.get(plan.semis[0].pair_two_id))}`
+                        : "1.º Grupo A vs 1.º Grupo C"}
+                    </p>
+                    <p>
+                      Cancha {plan.semis[1]?.court || "3"}: {plan.semis[1]
+                        ? `${pairName(pairById.get(plan.semis[1].pair_one_id))} vs ${pairName(pairById.get(plan.semis[1].pair_two_id))}`
+                        : "1.º Grupo B vs mejor 2.º"}
+                    </p>
+                    {plan.bestSecond && <small>Mejor segundo actual: {pairName(plan.bestSecond.pair)} · {plan.bestSecond.points} pts</small>}
+                  </div>
+                  <div className="dynamic-court-card">
+                    <span>Finales · {plan.finalTime}</span>
+                    <strong>Final y tercer lugar</strong>
+                    <p>Cancha {plan.finals[0]?.court || "1"}: {plan.finals[0] ? `${pairName(pairById.get(plan.finals[0].pair_one_id))} vs ${pairName(pairById.get(plan.finals[0].pair_two_id))}` : "Ganadores de semifinal"}</p>
+                    <p>Cancha {plan.finals[1]?.court || "3"}: {plan.finals[1] ? `${pairName(pairById.get(plan.finals[1].pair_one_id))} vs ${pairName(pairById.get(plan.finals[1].pair_two_id))}` : "Perdedores de semifinal"}</p>
+                  </div>
+                </div>
+                <div className="dynamic-actions">
+                  <button type="button" className="secondary-action" disabled={!canCreateSemis} onClick={() => createMatches(missingSemis)}>
+                    Crear semifinales
+                  </button>
+                  <button type="button" className="secondary-action" disabled={!canCreateFinals} onClick={() => createMatches(missingFinals)}>
+                    Crear final y 3er lugar
+                  </button>
+                </div>
+              </>
+            ) : plan.type === "placements" ? (
               <>
                 <div className="qualifier-grid">
                   {plan.groupPlans.map((group) => (

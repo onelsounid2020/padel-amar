@@ -8,6 +8,7 @@ env/
 *.db
 *.db-*
 *.db.*
+*.dump
 node_modules/
 dist/
 .DS_Store
