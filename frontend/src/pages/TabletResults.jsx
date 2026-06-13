@@ -20,6 +20,17 @@ function parseFixtureRound(roundName) {
   };
 }
 
+function fixtureRoundInfo(roundName, fallbackIndex = 0) {
+  const value = roundName || "";
+  const match = value.match(/ronda\s*(\d+)/i) || value.match(/(?:partido|r)\s*(\d+)/i);
+  const number = match ? Number(match[1]) : fallbackIndex + 1;
+  return {
+    key: `round-${number}`,
+    label: `Ronda ${number}`,
+    number,
+  };
+}
+
 function normalizeCourt(court) {
   if (!court) return "Sin cancha";
   const value = String(court).trim();
@@ -92,17 +103,17 @@ export function TabletResults({
   onRefresh,
 }) {
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [turnFilter, setTurnFilter] = useState("next");
+  const [roundFilter, setRoundFilter] = useState("next");
   const [statusFilter, setStatusFilter] = useState("pending");
   const [scores, setScores] = useState({});
   const [winnerSide, setWinnerSide] = useState({});
-  const [confirmingMatchId, setConfirmingMatchId] = useState(null);
   const [showInsights, setShowInsights] = useState(true);
 
   const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
   const matchRows = useMemo(() => matches
-    .map((match) => {
+    .map((match, index) => {
       const schedule = parseFixtureRound(match.round_name);
+      const round = fixtureRoundInfo(match.round_name, index);
       const one = pairById.get(match.pair_one_id);
       const two = pairById.get(match.pair_two_id);
       const category = fixtureCategoryFromPairs(one, two, schedule.category);
@@ -114,11 +125,15 @@ export function TabletResults({
         match,
         pairOne: one ? pairName(one) : `Pareja ${match.pair_one_id}`,
         pairTwo: two ? pairName(two) : `Pareja ${match.pair_two_id}`,
+        roundKey: round.key,
+        roundLabel: round.label,
+        roundNumber: round.number,
         time: schedule.time,
         turn: schedule.turn,
       };
     })
     .sort((a, b) => {
+      if (a.roundNumber !== b.roundNumber) return a.roundNumber - b.roundNumber;
       const timeCompare = minutesFromSlot(a.time || a.turn) - minutesFromSlot(b.time || b.turn);
       if (timeCompare !== 0) return timeCompare;
       return a.courtLabel.localeCompare(b.courtLabel, undefined, { numeric: true });
@@ -135,9 +150,10 @@ export function TabletResults({
   }, [matches]);
 
   const categories = [...new Set(matchRows.map((row) => row.category))];
-  const turns = [...new Set(matchRows.map((row) => row.time || row.turn))];
-  const nextTurn = turns.find((turn) => matchRows.some((row) => (row.time || row.turn) === turn && !row.done)) || turns[0] || "";
-  const activeTurn = turnFilter === "next" ? nextTurn : turnFilter;
+  const rounds = [...new Map(matchRows.map((row) => [row.roundKey, { key: row.roundKey, label: row.roundLabel, number: row.roundNumber }])).values()]
+    .sort((left, right) => left.number - right.number);
+  const nextRound = rounds.find((round) => matchRows.some((row) => row.roundKey === round.key && !row.done))?.key || rounds[0]?.key || "";
+  const activeRound = roundFilter === "next" ? nextRound : roundFilter;
   const completedCount = matchRows.filter((row) => row.done).length;
   const pendingCount = matchRows.length - completedCount;
   const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
@@ -153,7 +169,7 @@ export function TabletResults({
 
   const visibleRows = matchRows.filter((row) => (
     (categoryFilter === "all" || row.category === categoryFilter)
-    && (!activeTurn || (row.time || row.turn) === activeTurn)
+    && (!activeRound || row.roundKey === activeRound)
     && (statusFilter === "all" || (statusFilter === "pending" ? !row.done : row.done))
   ));
   const hasUnsavedScores = matchRows.some((row) => {
@@ -180,12 +196,6 @@ export function TabletResults({
         [field]: String(numericValue),
       },
     }));
-    setConfirmingMatchId(null);
-  }
-
-  function bumpScore(matchId, field, amount) {
-    const currentValue = Number(scores[matchId]?.[field] || 0);
-    setScore(matchId, field, currentValue + amount);
   }
 
   function applyPreset(matchId, winner, winnerScore, loserScore) {
@@ -197,7 +207,6 @@ export function TabletResults({
         pair_two_score: String(winner === "two" ? winnerScore : loserScore),
       },
     }));
-    setConfirmingMatchId(null);
   }
 
   function resetMatchScore(row) {
@@ -208,7 +217,6 @@ export function TabletResults({
         pair_two_score: normalizeScore(row.match.pair_two_score),
       },
     }));
-    setConfirmingMatchId(null);
   }
 
   function saveMatch(matchId) {
@@ -242,9 +250,9 @@ export function TabletResults({
           <option value="all">Todas las categorías</option>
           {categories.map((category) => <option key={category} value={category}>{category}</option>)}
         </select>
-        <select value={turnFilter} onChange={(event) => setTurnFilter(event.target.value)}>
-          <option value="next">Próximo turno</option>
-          {turns.map((turn) => <option key={turn} value={turn}>{turn}</option>)}
+        <select value={roundFilter} onChange={(event) => setRoundFilter(event.target.value)}>
+          <option value="next">Próxima ronda pendiente</option>
+          {rounds.map((round) => <option key={round.key} value={round.key}>{round.label}</option>)}
         </select>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="pending">Pendientes</option>
@@ -328,7 +336,6 @@ export function TabletResults({
             || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
           const state = scoreState(current);
           const selectedWinner = winnerSide[row.match.id] || (Number(current.pair_two_score || 0) > Number(current.pair_one_score || 0) ? "two" : "one");
-          const isConfirming = confirmingMatchId === row.match.id;
           return (
             <article className={`tablet-match ${row.done ? "done" : ""} ${isDirty ? "dirty" : ""}`} key={row.match.id}>
               <div className="tablet-match-head">
@@ -336,55 +343,22 @@ export function TabletResults({
                 <strong>{row.courtLabel}</strong>
                 <em>{row.category}{row.group ? ` · ${row.group}` : ""}</em>
               </div>
-              <div className="tablet-scoreboard">
-                <div className={`tablet-team ${Number(current.pair_one_score || 0) > Number(current.pair_two_score || 0) ? "leading" : ""}`}>
-                  <strong>{row.pairOne}</strong>
-                  <div className="tablet-score-control">
-                    <button type="button" aria-label="Restar punto pareja 1" onClick={() => bumpScore(row.match.id, "pair_one_score", -1)}>-</button>
-                    <input
-                      type="number"
-                      min="0"
-                      inputMode="numeric"
-                      value={current.pair_one_score}
-                      onChange={(event) => setScore(row.match.id, "pair_one_score", event.target.value)}
-                    />
-                    <button type="button" aria-label="Sumar punto pareja 1" onClick={() => bumpScore(row.match.id, "pair_one_score", 1)}>+</button>
-                  </div>
-                </div>
-                <div className="tablet-score-divider">
-                  <span>{current.pair_one_score || 0}</span>
-                  <em>-</em>
-                  <span>{current.pair_two_score || 0}</span>
-                </div>
-                <div className={`tablet-team ${Number(current.pair_two_score || 0) > Number(current.pair_one_score || 0) ? "leading" : ""}`}>
-                  <strong>{row.pairTwo}</strong>
-                  <div className="tablet-score-control">
-                    <button type="button" aria-label="Restar punto pareja 2" onClick={() => bumpScore(row.match.id, "pair_two_score", -1)}>-</button>
-                    <input
-                      type="number"
-                      min="0"
-                      inputMode="numeric"
-                      value={current.pair_two_score}
-                      onChange={(event) => setScore(row.match.id, "pair_two_score", event.target.value)}
-                    />
-                    <button type="button" aria-label="Sumar punto pareja 2" onClick={() => bumpScore(row.match.id, "pair_two_score", 1)}>+</button>
-                  </div>
-                </div>
-              </div>
-              <div className="tablet-winner-toggle" aria-label="Ganador para marcadores rápidos">
+              <div className="tablet-winner-pick" aria-label="Seleccionar dupla ganadora">
                 <button
                   type="button"
                   className={selectedWinner === "one" ? "active" : ""}
                   onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "one" }))}
                 >
-                  Gana 1
+                  <span>Dupla 1</span>
+                  <strong>{row.pairOne}</strong>
                 </button>
                 <button
                   type="button"
                   className={selectedWinner === "two" ? "active" : ""}
                   onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "two" }))}
                 >
-                  Gana 2
+                  <span>Dupla 2</span>
+                  <strong>{row.pairTwo}</strong>
                 </button>
               </div>
               <div className="tablet-presets" aria-label="Marcadores rápidos">
@@ -398,6 +372,26 @@ export function TabletResults({
                   </button>
                 ))}
               </div>
+              <div className="tablet-manual-score">
+                <span>Otro resultado</span>
+                <input
+                  aria-label={`Puntaje ${row.pairOne}`}
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={current.pair_one_score}
+                  onChange={(event) => setScore(row.match.id, "pair_one_score", event.target.value)}
+                />
+                <b>-</b>
+                <input
+                  aria-label={`Puntaje ${row.pairTwo}`}
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={current.pair_two_score}
+                  onChange={(event) => setScore(row.match.id, "pair_two_score", event.target.value)}
+                />
+              </div>
               <div className={`tablet-score-state ${state.tone}`}>
                 <span>{state.label}</span>
                 {isDirty && (
@@ -406,19 +400,9 @@ export function TabletResults({
                   </button>
                 )}
               </div>
-              {isConfirming ? (
-                <div className="tablet-confirm-save">
-                  <span>Confirmar {current.pair_one_score || 0}-{current.pair_two_score || 0}</span>
-                  <button type="button" className="secondary-action" onClick={() => setConfirmingMatchId(null)}>Cancelar</button>
-                  <button type="button" disabled={!canSave || loading} onClick={() => saveMatch(row.match.id)}>
-                    <Check size={16} /> Confirmar
-                  </button>
-                </div>
-              ) : (
-                <button className="tablet-save" type="button" disabled={!canSave || loading} onClick={() => setConfirmingMatchId(row.match.id)}>
-                  <Check size={16} /> {isDirty ? "Guardar" : row.done ? "Confirmar edición" : "Guardar"}
-                </button>
-              )}
+              <button className="tablet-save" type="button" disabled={!canSave || loading || !isDirty} onClick={() => saveMatch(row.match.id)}>
+                <Check size={16} /> {row.done ? "Guardar corrección" : "Guardar resultado"}
+              </button>
             </article>
           );
         }) : (

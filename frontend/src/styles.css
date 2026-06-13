@@ -4706,6 +4706,47 @@ h3 {
   grid-template-columns: minmax(0, 1fr) 66px minmax(0, 1fr);
 }
 
+.tablet-winner-pick {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tablet-winner-pick button {
+  background: #f4fbfe;
+  border: 2px solid #c7d9e4;
+  box-shadow: none;
+  color: #08223b;
+  display: grid;
+  gap: 3px;
+  min-height: 62px;
+  padding: 7px;
+}
+
+.tablet-winner-pick button span {
+  color: #526670;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tablet-winner-pick button strong {
+  font-size: 0.84rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.tablet-winner-pick button.active {
+  background: #e9f8e0;
+  border-color: #78bf2a;
+  color: #08223b;
+}
+
+.tablet-winner-pick button.active span::after {
+  content: " · ganadora";
+  color: #0a6f54;
+}
+
 .tablet-team {
   background: #f4fbfe;
   border: 1px solid #c7d9e4;
@@ -4815,6 +4856,37 @@ h3 {
   font-weight: 900;
   min-height: 34px;
   padding: 0 4px;
+}
+
+.tablet-manual-score {
+  align-items: center;
+  background: #f4fbfe;
+  border: 1px solid #d9e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: minmax(88px, 1fr) 52px 12px 52px;
+  padding: 4px 6px;
+}
+
+.tablet-manual-score span {
+  color: #526670;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tablet-manual-score input {
+  font-size: 1.1rem;
+  font-weight: 900;
+  min-height: 36px;
+  padding: 2px;
+  text-align: center;
+}
+
+.tablet-manual-score b {
+  color: #526670;
+  text-align: center;
 }
 
 .tablet-score-state {
