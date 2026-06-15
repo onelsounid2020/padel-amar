@@ -43,6 +43,7 @@ button {
   gap: 8px;
   justify-content: center;
   min-height: var(--control-h);
+  min-width: 0;
   padding: 0 14px;
   white-space: nowrap;
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
@@ -66,6 +67,7 @@ textarea {
   border-radius: 7px;
   color: #0a1b2a;
   min-height: var(--control-h);
+  min-width: 0;
   padding: 9px 10px;
   width: 100%;
 }
@@ -314,6 +316,78 @@ h3 {
   gap: 12px;
 }
 
+.remembered-device-card {
+  align-items: center;
+  background: #ecf9e8;
+  border: 1px solid #a8e641;
+  border-left: 5px solid #13a66f;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.remembered-device-card div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.remembered-device-card span,
+.remember-device-toggle small {
+  color: #51625f;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.remembered-device-card strong {
+  color: #08223b;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.remembered-device-card small {
+  color: #526670;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.remembered-device-card button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  width: auto;
+}
+
+.remember-device-toggle {
+  align-items: start;
+  background: #f4fbfe;
+  border: 1px solid #c7d9e4;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.remember-device-toggle input {
+  accent-color: #13a66f;
+  height: 19px;
+  margin-top: 2px;
+  min-height: 19px;
+  width: 19px;
+}
+
+.remember-device-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.remember-device-toggle strong {
+  color: #08223b;
+  line-height: 1.2;
+}
+
 .password-input-wrap {
   position: relative;
 }
@@ -477,6 +551,7 @@ h3 {
   gap: 4px 12px;
   grid-template-columns: minmax(0, 1fr) repeat(3, auto);
   min-height: 58px;
+  min-width: 0;
   padding: 10px 12px;
 }
 
@@ -484,12 +559,15 @@ h3 {
   color: #08223b;
   font-size: 0.96rem;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metric-card span,
 .muted,
 .empty {
   color: #5b6d67;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .workspace {
@@ -525,12 +603,18 @@ h3 {
 
 .section-head select {
   max-width: 320px;
+  min-width: 0;
 }
 
 .event-picker {
   align-items: center;
   display: flex;
   gap: 10px;
+  min-width: 0;
+}
+
+.event-picker select {
+  min-width: 0;
 }
 
 .event-picker .secondary-action {
@@ -551,6 +635,14 @@ h3 {
   white-space: nowrap;
 }
 
+.event-history-toggle input {
+  accent-color: #13a66f;
+  flex: 0 0 18px;
+  height: 18px;
+  min-height: 18px;
+  width: 18px;
+}
+
 .event-summary {
   background: linear-gradient(135deg, #0a3154, #0f6ea8 58%, #13a66f);
   border: 0;
@@ -559,7 +651,15 @@ h3 {
   display: grid;
   gap: 5px;
   margin-bottom: var(--section-gap);
+  min-width: 0;
   padding: 12px;
+}
+
+.event-summary strong,
+.event-summary span,
+.event-summary em {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .event-summary span {
@@ -2971,6 +3071,7 @@ h3 {
   display: flex;
   gap: 4px;
   margin-bottom: 18px;
+  min-width: 0;
   padding: 4px;
 }
 
@@ -2980,6 +3081,7 @@ h3 {
   color: #0a3154;
   flex: 1;
   min-height: 38px;
+  min-width: 0;
 }
 
 .event-tabs button.active {
@@ -3620,9 +3722,18 @@ h3 {
   gap: 4px;
   justify-content: stretch;
   min-height: auto;
+  min-width: 0;
   padding: 12px;
   text-align: left;
   white-space: normal;
+}
+
+.registration-event-card strong,
+.registration-event-card span,
+.registration-event-card em,
+.registration-event-card b {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .registration-event-card.active {
@@ -4045,6 +4156,40 @@ h3 {
   padding: clamp(16px, 3vw, 28px);
 }
 
+.registration-hero-side {
+  display: grid;
+  gap: 10px;
+}
+
+.registration-player-chip {
+  background: rgb(255 255 255 / 0.14);
+  border: 1px solid rgb(255 255 255 / 0.26);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+}
+
+.registration-player-chip span {
+  color: #a8e641;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.registration-player-chip strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.registration-player-chip small {
+  color: #d9edf8;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
 .registration-hero-card h2 {
   color: #ffffff;
   font-size: clamp(1.65rem, 4vw, 3rem);
@@ -4110,6 +4255,30 @@ h3 {
   line-height: 1.45;
   margin: 0;
   max-width: 660px;
+}
+
+.registration-gate-benefits {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 720px);
+}
+
+.registration-gate-benefits span {
+  align-items: center;
+  background: #f4fbfe;
+  border: 1px solid #d8e7f4;
+  border-radius: 8px;
+  color: #0a3154;
+  display: flex;
+  font-weight: 900;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 11px;
+}
+
+.registration-gate-benefits svg {
+  color: #13a66f;
+  flex: 0 0 auto;
 }
 
 .registration-wizard-grid {
@@ -4191,6 +4360,7 @@ h3 {
   gap: 5px;
   justify-content: stretch;
   min-height: 156px;
+  min-width: 0;
   padding: 12px;
   text-align: left;
   white-space: normal;
@@ -4205,6 +4375,7 @@ h3 {
 
 .event-choice-card strong {
   line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .event-choice-card small,
@@ -4214,6 +4385,8 @@ h3 {
   font-style: normal;
   font-weight: 800;
   line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .event-choice-card.active small,
@@ -4312,6 +4485,7 @@ h3 {
   border-radius: 8px;
   display: grid;
   gap: 4px;
+  min-width: 0;
   padding: 12px;
 }
 
@@ -5837,12 +6011,15 @@ h3 {
   font-size: clamp(0.95rem, 1.8vw, 1.25rem);
   line-height: 1.05;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tablet-top span {
   color: #dff2fb;
   font-size: 0.82rem;
   font-weight: 800;
+  min-width: 0;
+  overflow-wrap: anywhere;
   white-space: nowrap;
 }
 
@@ -5851,8 +6028,10 @@ h3 {
   background: #a8e641;
   box-shadow: none;
   color: #08223b;
+  justify-self: end;
   min-height: 40px;
   padding: 0;
+  width: 40px;
 }
 
 .tablet-controls {
@@ -5871,6 +6050,7 @@ h3 {
 .tablet-controls select,
 .tablet-top select {
   min-height: 36px;
+  min-width: 0;
 }
 
 .tablet-panel-toggle {
@@ -7736,9 +7916,13 @@ h3 {
     align-items: center;
     border-radius: 0 0 8px 8px;
     display: flex;
-    margin: calc(var(--page-pad) * -1) calc(var(--page-pad) * -1) var(--section-gap);
+    margin: calc(var(--page-pad) * -1) 0 var(--section-gap);
     padding: 10px 8px;
     top: 0;
+  }
+
+  .topbar-brand {
+    min-width: 0;
   }
 
   .topbar .eyebrow {
@@ -7919,6 +8103,20 @@ h3 {
 
   .registration-hero-card {
     padding: 16px;
+  }
+
+  .registration-player-chip,
+  .registration-progress {
+    width: 100%;
+  }
+
+  .remembered-device-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .remembered-device-card button {
+    width: 100%;
   }
 
   .event-choice-card,

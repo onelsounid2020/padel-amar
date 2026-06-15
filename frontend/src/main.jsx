@@ -146,6 +146,32 @@ const eventCategoryGroups = [
 
 const allPadelCategories = eventCategoryGroups.flatMap((group) => group.categories);
 const tabletAccessStorageKey = "amar_tablet_access_token";
+const rememberedDeviceStorageKey = "amar_remembered_player_device";
+
+function readRememberedDevice() {
+  try {
+    const value = localStorage.getItem(rememberedDeviceStorageKey);
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRememberedDevice(user, fallbackEmail = "") {
+  if (!user && !fallbackEmail) return null;
+  const remembered = {
+    email: user?.email || fallbackEmail,
+    name: user?.name || fallbackEmail,
+    role: user?.role || "jugador",
+    rememberedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(rememberedDeviceStorageKey, JSON.stringify(remembered));
+  return remembered;
+}
+
+function clearRememberedDevice() {
+  localStorage.removeItem(rememberedDeviceStorageKey);
+}
 
 function categoryLabel(category) {
   return category;
@@ -291,7 +317,11 @@ function App() {
   const [currentPermissions, setCurrentPermissions] = useState(publicPermissions);
   const [permissionModules, setPermissionModules] = useState(fallbackPermissionModules);
   const [rolePermissions, setRolePermissions] = useState([]);
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [rememberedDevice, setRememberedDevice] = useState(() => readRememberedDevice());
+  const [loginForm, setLoginForm] = useState(() => {
+    const remembered = readRememberedDevice();
+    return { email: remembered?.email || "", password: "", remember_device: Boolean(remembered) };
+  });
   const [signupForm, setSignupForm] = useState({
     name: "",
     email: "",
@@ -299,6 +329,7 @@ function App() {
     phone: "",
     category: "5ta",
     preferred_side: "indiferente",
+    remember_device: true,
   });
   const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "jugador" });
   const [error, setError] = useState("");
@@ -916,8 +947,14 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const response = await api.login(loginForm);
-      setAuthToken(response.access_token);
+      const { remember_device: rememberDevice, ...credentials } = loginForm;
+      const response = await api.login(credentials);
+      setAuthToken(response.access_token, { persistent: Boolean(rememberDevice) });
+      if (rememberDevice) setRememberedDevice(writeRememberedDevice(response.user, credentials.email));
+      else {
+        clearRememberedDevice();
+        setRememberedDevice(null);
+      }
       setAuthUser(response.user);
       const permissionData = await loadPermissions(response.user);
       await loadBase(response.user, permissionData);
@@ -936,11 +973,17 @@ function App() {
     setError("");
     setSignupNotice(null);
     try {
+      const { remember_device: rememberDevice, ...playerData } = signupForm;
       const response = await api.registerPlayer({
-        ...signupForm,
+        ...playerData,
         phone: signupForm.phone || null,
       });
-      setAuthToken(response.access_token);
+      setAuthToken(response.access_token, { persistent: Boolean(rememberDevice) });
+      if (rememberDevice) setRememberedDevice(writeRememberedDevice(response.user, playerData.email));
+      else {
+        clearRememberedDevice();
+        setRememberedDevice(null);
+      }
       setAuthUser(response.user);
       await loadPermissions(response.user);
       setPublicForm({
@@ -980,6 +1023,12 @@ function App() {
     setUsers([]);
     setCurrentPermissions(publicPermissions);
     setRolePermissions([]);
+  }
+
+  function forgetRememberedDevice() {
+    clearRememberedDevice();
+    setRememberedDevice(null);
+    setLoginForm((current) => ({ ...current, email: "", password: "", remember_device: false }));
   }
 
   async function submitUser(event) {
@@ -1336,7 +1385,15 @@ function App() {
       return (
         <main className="tablet-shell">
           {error && <div className="alert tablet-alert">{error}</div>}
-          <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} compact />
+          <LoginPage
+            form={loginForm}
+            setForm={setLoginForm}
+            onSubmit={submitLogin}
+            loading={loading}
+            compact
+            rememberedDevice={rememberedDevice}
+            onForgetDevice={forgetRememberedDevice}
+          />
         </main>
       );
     }
@@ -1353,7 +1410,15 @@ function App() {
     return (
       <main className="app-shell">
         {error && <div className="alert">{error}</div>}
-        <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} goSignup={() => navigatePage("signup")} />
+        <LoginPage
+          form={loginForm}
+          setForm={setLoginForm}
+          onSubmit={submitLogin}
+          loading={loading}
+          goSignup={() => navigatePage("signup")}
+          rememberedDevice={rememberedDevice}
+          onForgetDevice={forgetRememberedDevice}
+        />
       </main>
     );
   }
@@ -1428,8 +1493,9 @@ function ConfirmModal({ dialog, setDialog, loading }) {
   );
 }
 
-function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup }) {
+function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup, rememberedDevice, onForgetDevice }) {
   const [showPassword, setShowPassword] = useState(false);
+  const hasRememberedDevice = Boolean(rememberedDevice?.email);
 
   return (
     <section className={compact ? "login-page compact" : "login-page"}>
@@ -1437,13 +1503,23 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
         <p className="eyebrow">Acceso AmarPadel</p>
         <h1>{compact ? "Acceso operador" : "Entra a tu cuenta"}</h1>
         <p>{compact ? "Ingresa con una cuenta autorizada para cargar resultados." : "Usa tu cuenta jugador o administrativa para continuar."}</p>
+        {hasRememberedDevice && (
+          <div className="remembered-device-card">
+            <div>
+              <span>Dispositivo recordado</span>
+              <strong>{rememberedDevice.name || rememberedDevice.email}</strong>
+              <small>{rememberedDevice.email}</small>
+            </div>
+            <button type="button" className="secondary-action" onClick={onForgetDevice}>No soy yo</button>
+          </div>
+        )}
         <form onSubmit={onSubmit} className="login-form" autoComplete="off">
           <label className="form-field">
             <span>Email</span>
             <input
               type="email"
               name="amar-login-email"
-              autoComplete="off"
+              autoComplete="email"
               value={form.email}
               onChange={(event) => setForm({ ...form, email: event.target.value })}
               required
@@ -1455,7 +1531,7 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
               <input
                 type={showPassword ? "text" : "password"}
                 name="amar-login-password"
-                autoComplete="new-password"
+                autoComplete="current-password"
                 value={form.password}
                 onChange={(event) => setForm({ ...form, password: event.target.value })}
                 required
@@ -1470,6 +1546,17 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+          </label>
+          <label className="remember-device-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(form.remember_device)}
+              onChange={(event) => setForm({ ...form, remember_device: event.target.checked })}
+            />
+            <span>
+              <strong>Recordar este dispositivo</strong>
+              <small>Mantiene tu sesión y tu email listos en este navegador. No guarda tu contraseña.</small>
+            </span>
           </label>
           <button disabled={loading}>Entrar</button>
         </form>
@@ -1487,6 +1574,8 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
 }
 
 function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goRegister, goLogin }) {
+  const [showPassword, setShowPassword] = useState(false);
+
   useEffect(() => {
     if (!notice) return undefined;
     function closeOnEscape(event) {
@@ -1554,11 +1643,28 @@ function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goReg
             </label>
             <label className="form-field">
               <span>Email</span>
-              <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
+              <input type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
             </label>
             <label className="form-field">
               <span>Contraseña</span>
-              <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+              <div className="password-input-wrap">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={(event) => setForm({ ...form, password: event.target.value })}
+                  required
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </label>
             <label className="form-field">
               <span>Teléfono</span>
@@ -1575,6 +1681,17 @@ function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goReg
                 <option value="reves">Revés</option>
                 <option value="indiferente">Indiferente</option>
               </select>
+            </label>
+            <label className="remember-device-toggle wide-field">
+              <input
+                type="checkbox"
+                checked={Boolean(form.remember_device)}
+                onChange={(event) => setForm({ ...form, remember_device: event.target.checked })}
+              />
+              <span>
+                <strong>Recordar este dispositivo</strong>
+                <small>Después de crear tu perfil, este navegador sabrá quién eres para entrar más rápido.</small>
+              </span>
             </label>
             <button disabled={loading}>Crear perfil y continuar</button>
           </form>
@@ -4512,14 +4629,29 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
       <div className="registration-wizard">
         <section className="registration-hero-card">
           <div>
-            <p className="eyebrow">Inscripciones AMAR</p>
-            <h2>Elige tu evento y deja tu dupla lista</h2>
-            <p>Un flujo pensado para jugadores: selecciona fecha, define tu categoría, elige si vienes con partner y confirma.</p>
+            <p className="eyebrow">Inscripción jugador</p>
+            <h2>Anótate al evento en menos de un minuto</h2>
+            <p>Elige el torneo, confirma tu categoría y decide si vienes con partner o quieres que la organización te complete.</p>
           </div>
-          <div className="registration-progress" aria-label="Pasos de inscripción">
-            <span className={registrationStep >= 1 ? "active" : ""}><UserPlus size={16} /> Cuenta</span>
-            <span className={registrationStep >= 2 ? "active" : ""}><CalendarPlus size={16} /> Evento</span>
-            <span className={registrationStep >= 3 ? "active" : ""}><Check size={16} /> Confirmar</span>
+          <div className="registration-hero-side">
+            {authUser?.role === "jugador" ? (
+              <div className="registration-player-chip">
+                <span>Entrando como</span>
+                <strong>{authUser.name}</strong>
+                <small>{authUser.category || "Sin categoría"} · {authUser.preferred_side || "lado indiferente"}</small>
+              </div>
+            ) : (
+              <div className="registration-player-chip">
+                <span>Primer paso</span>
+                <strong>Crea o entra a tu perfil</strong>
+                <small>Así el evento puede recordar tus partidos, ranking y avisos.</small>
+              </div>
+            )}
+            <div className="registration-progress" aria-label="Pasos de inscripción">
+              <span className={registrationStep >= 1 ? "active" : ""}><UserPlus size={16} /> Cuenta</span>
+              <span className={registrationStep >= 2 ? "active" : ""}><CalendarPlus size={16} /> Evento</span>
+              <span className={registrationStep >= 3 ? "active" : ""}><Check size={16} /> Confirmar</span>
+            </div>
           </div>
         </section>
 
@@ -4530,8 +4662,13 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
             </div>
             <div>
               <p className="eyebrow">Cuenta jugador requerida</p>
-              <h2>Antes de inscribirte necesitamos reconocer tu perfil</h2>
-              <p>Así evitamos duplicados, guardamos tu progreso del evento y hacemos que tus resultados aparezcan en tu perfil.</p>
+              <h2>Necesitamos saber quién eres antes de inscribirte</h2>
+              <p>Tu perfil evita duplicados, te muestra el avance del evento y deja tus resultados asociados a tu cuenta.</p>
+            </div>
+            <div className="registration-gate-benefits" aria-label="Beneficios del perfil jugador">
+              <span><Check size={16} /> Inscripción más rápida en próximos eventos</span>
+              <span><Check size={16} /> Ranking y partidos visibles desde tu perfil</span>
+              <span><Check size={16} /> Dispositivo recordado si lo autorizas al entrar</span>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={goSignup}>Crear perfil jugador</button>
