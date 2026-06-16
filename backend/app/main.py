@@ -39,6 +39,8 @@ def ensure_local_schema() -> None:
             connection.execute(text("ALTER TABLE events ADD COLUMN fixture_config JSON DEFAULT '{}'"))
         if "status" not in columns:
             connection.execute(text("ALTER TABLE events ADD COLUMN status VARCHAR(19) NOT NULL DEFAULT 'registration_open'"))
+        if "event_type" not in columns:
+            connection.execute(text("ALTER TABLE events ADD COLUMN event_type VARCHAR(7) NOT NULL DEFAULT 'hombres'"))
         if "users" in table_names:
             user_columns = {column["name"] for column in inspector.get_columns("users")}
             if "phone" not in user_columns:

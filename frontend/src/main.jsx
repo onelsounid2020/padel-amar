@@ -40,6 +40,7 @@ const emptyEvent = {
   schedule: "",
   capacity: 16,
   tournament_type: "Americano",
+  event_type: "hombres",
   category_configs: [],
   ranking_config: {},
   fixture_config: {},
@@ -133,17 +134,23 @@ const publicPermissions = {
 };
 
 const categoryOptions = {
-  hombre: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
-  mujer: ["D+", "C+", "B+", "A+"],
-  mixto: ["Mixto 4ta C+", "5ta D+"],
+  hombres: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
+  mujeres: ["D+", "C+", "B+", "A+"],
+  mixto: ["4ta C+", "5ta D+"],
 };
 
 const eventCategoryGroups = [
-  { key: "hombre", label: "Hombres", categories: categoryOptions.hombre },
-  { key: "mujer", label: "Mujeres", categories: categoryOptions.mujer },
+  { key: "hombres", label: "Hombres", categories: categoryOptions.hombres },
+  { key: "mujeres", label: "Mujeres", categories: categoryOptions.mujeres },
   { key: "mixto", label: "Mixto", categories: categoryOptions.mixto },
 ];
 
+const eventTypeOptions = [
+  { value: "hombres", label: "Solo hombres" },
+  { value: "mujeres", label: "Solo mujeres" },
+  { value: "mixto", label: "Mixto" },
+];
+const eventTypeLabels = Object.fromEntries(eventTypeOptions.map((option) => [option.value, option.label]));
 const allPadelCategories = eventCategoryGroups.flatMap((group) => group.categories);
 const tabletAccessStorageKey = "amar_tablet_access_token";
 const rememberedDeviceStorageKey = "amar_remembered_player_device";
@@ -175,6 +182,24 @@ function clearRememberedDevice() {
 
 function categoryLabel(category) {
   return category;
+}
+
+function categoriesForEventType(eventType) {
+  return categoryOptions[eventType] || categoryOptions.hombres;
+}
+
+function defaultCategoriesForEventType(eventType) {
+  return categoriesForEventType(eventType).join(" / ");
+}
+
+function eventCategoriesForEvent(event) {
+  const configuredCategories = [
+    ...new Set([
+      ...(event?.category_configs || []).map((config) => config.category).filter(Boolean),
+      ...(event?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
+    ]),
+  ];
+  return configuredCategories.length ? configuredCategories : categoriesForEventType(event?.event_type || "hombres");
 }
 
 function isValidEmail(value) {
@@ -616,6 +641,8 @@ function App() {
     await run(async () => {
       const payload = {
         ...eventForm,
+        event_type: eventForm.event_type || "hombres",
+        categories: eventForm.categories || defaultCategoriesForEventType(eventForm.event_type || "hombres"),
         price: Number(eventForm.price),
         capacity: Number(eventForm.capacity),
         category_configs: (eventForm.category_configs || [])
@@ -733,13 +760,10 @@ function App() {
 
     setLoading(true);
     try {
-      const eventCategories = [
-        ...new Set([
-          ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
-          ...(selectedEvent?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
-        ]),
-      ];
-      const category = categoryLabel(publicForm.category || eventCategories[0] || "1era");
+      const eventCategories = eventCategoriesForEvent(selectedEvent);
+      const category = categoryLabel(
+        eventCategories.includes(publicForm.category) ? publicForm.category : eventCategories[0] || "1era"
+      );
       const registration = await api.publicRegister(selectedEventId, {
         player_user_id: authUser?.role === "jugador" ? authUser.id : null,
         name: publicForm.name,
@@ -762,6 +786,7 @@ function App() {
         partnerName: publicForm.partner_name,
         waitlisted: registration.pair?.status === "lista_espera",
       });
+      window.setTimeout(() => navigatePage("player"), 1800);
       setPublicForm(authUser?.role === "jugador" ? {
         ...emptyPublicRegistration,
         name: authUser.name || "",
@@ -1108,6 +1133,7 @@ function App() {
       pairs={pairs}
       goSignup={() => navigatePage("signup")}
       goLogin={() => navigatePage("events")}
+      goProfile={() => navigatePage("player")}
     />
   ) : page === "player" ? (
     <PlayerProfile
@@ -2961,6 +2987,7 @@ function EventsPage(props) {
       schedule: selectedEvent.schedule || "",
       capacity: selectedEvent.capacity ?? 16,
       tournament_type: selectedEvent.tournament_type || "Americano",
+      event_type: selectedEvent.event_type || "hombres",
       category_configs: selectedEvent.category_configs || [],
       ranking_config: selectedEvent.ranking_config || {},
       fixture_config: selectedEvent.fixture_config || {},
@@ -2993,12 +3020,16 @@ function EventsPage(props) {
         <div className="section-head">
           <h2>{forcedTab === "matches" ? <Swords size={18} /> : <ListChecks size={18} />} {forcedTab === "matches" ? "Partidos" : "Operación del evento"}</h2>
           <div className="event-picker">
-            {!forcedTab && <button type="button" className="secondary-action" onClick={startNewEvent}>
-              <CalendarPlus size={16} /> Nuevo evento
-            </button>}
-            {!forcedTab && <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
-              Eliminar
-            </button>}
+            {!forcedTab && (
+              <div className="event-picker-actions" aria-label="Acciones de evento">
+                <button type="button" className="secondary-action" onClick={startNewEvent}>
+                  <CalendarPlus size={16} /> Nuevo evento
+                </button>
+                <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
+                  Eliminar
+                </button>
+              </div>
+            )}
             {!forcedTab && <label className="event-history-toggle">
               <input
                 type="checkbox"
@@ -4133,6 +4164,15 @@ function EventCategorySelect({ value, onChange }) {
 }
 
 function EventForm({ form, setForm, onSubmit, isEditing }) {
+  function updateEventType(eventType) {
+    setForm({
+      ...form,
+      event_type: eventType,
+      categories: defaultCategoriesForEventType(eventType),
+      category_configs: [],
+    });
+  }
+
   return (
     <div className="data-block">
       <h3><CalendarPlus size={16} /> {isEditing ? "Editar evento" : "Crear evento"}</h3>
@@ -4162,6 +4202,13 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <span>Cupos</span>
           <input type="number" placeholder="56" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
           <small>Total máximo de jugadores/inscritos.</small>
+        </label>
+        <label className="form-field">
+          <span>Tipo de evento</span>
+          <select value={form.event_type || "hombres"} onChange={(e) => updateEventType(e.target.value)}>
+            {eventTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <small>Define qué categorías verá el jugador al registrarse.</small>
         </label>
         <label className="form-field">
           <span>Categorías</span>
@@ -4542,17 +4589,12 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onResetPasswor
   );
 }
 
-function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, notice, setNotice, onSubmit, loading, pairs, goSignup, goLogin }) {
+function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, notice, setNotice, onSubmit, loading, pairs, goSignup, goLogin, goProfile }) {
   const [partnerMode, setPartnerMode] = useState("searching");
-  const eventCategories = [
-    ...new Set([
-      ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
-      ...(selectedEvent?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
-    ]),
-  ];
-  const options = eventCategories.length ? eventCategories : categoryOptions[form.gender];
+  const [activeStep, setActiveStep] = useState(selectedEventId ? 2 : 1);
+  const options = eventCategoriesForEvent(selectedEvent);
   const hasPartner = partnerMode === "complete";
-  const selectedCategory = form.category || options[0] || "";
+  const selectedCategory = options.includes(form.category) ? form.category : options[0] || "";
   const availableMembers = members.filter((member) => member.id !== authUser?.id);
   const selectedPartnerMember = availableMembers.find((member) => String(member.id) === String(form.partner_member_id));
   const selectedEventPairs = pairs.filter((pair) => String(pair.event_id) === String(selectedEventId));
@@ -4573,6 +4615,15 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [notice, setNotice]);
 
+  useEffect(() => {
+    if (!selectedEventId || !options.length || options.includes(form.category)) return;
+    setForm((current) => ({ ...current, category: options[0] }));
+  }, [selectedEventId, selectedEvent?.event_type, selectedEvent?.categories]);
+
+  useEffect(() => {
+    if (!selectedEventId && activeStep > 1) setActiveStep(1);
+  }, [selectedEventId, activeStep]);
+
   function applyPartnerMember(memberId) {
     const member = availableMembers.find((item) => String(item.id) === String(memberId));
     setForm({
@@ -4586,8 +4637,11 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
   }
 
   function selectEvent(eventId) {
+    const nextEvent = events.find((event) => String(event.id) === String(eventId));
+    const nextOptions = eventCategoriesForEvent(nextEvent);
     setSelectedEventId(String(eventId));
-    setForm({ ...form, category: "" });
+    setForm({ ...form, category: nextOptions[0] || "" });
+    setActiveStep(2);
     setSuccess(null);
   }
 
@@ -4648,9 +4702,9 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
               </div>
             )}
             <div className="registration-progress" aria-label="Pasos de inscripción">
-              <span className={registrationStep >= 1 ? "active" : ""}><UserPlus size={16} /> Cuenta</span>
-              <span className={registrationStep >= 2 ? "active" : ""}><CalendarPlus size={16} /> Evento</span>
-              <span className={registrationStep >= 3 ? "active" : ""}><Check size={16} /> Confirmar</span>
+              <span className={`${registrationStep >= 1 ? "active" : ""} ${activeStep === 1 ? "current" : ""}`}><UserPlus size={16} /> Cuenta</span>
+              <span className={`${registrationStep >= 2 ? "active" : ""} ${activeStep === 2 ? "current" : ""}`}><CalendarPlus size={16} /> Evento</span>
+              <span className={`${registrationStep >= 3 ? "active" : ""} ${activeStep === 3 ? "current" : ""}`}><Check size={16} /> Confirmar</span>
             </div>
           </div>
         </section>
@@ -4685,11 +4739,12 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                     {success.playerName}
                     {success.partnerName ? ` y ${success.partnerName}` : ""} {success.waitlisted ? "quedaron en lista de espera para" : "quedaron inscritos en"} {success.eventName}.
                   </span>
-                  <button type="button" className="secondary-action" onClick={() => setSuccess(null)}>Hacer otra inscripción</button>
+                  <small>Te llevaremos a tu perfil para ver el estado de tu dupla.</small>
+                  <button type="button" onClick={goProfile}>Ir a mi perfil</button>
                 </div>
               )}
 
-              <section className="registration-step-card">
+              {!success && <section className={`registration-step-card wizard-step ${activeStep === 1 ? "active" : ""}`}>
                 <div className="step-card-head">
                   <span>1</span>
                   <div>
@@ -4713,14 +4768,20 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                         <strong>{event.name}</strong>
                         <small>{event.date} · {event.schedule}</small>
                         <em>{event.place}</em>
+                        <em>{eventTypeLabels[event.event_type] || "Solo hombres"}</em>
                         <b>{event.categories}</b>
                       </button>
                     );
                   })}
                 </div>
-              </section>
+                <div className="mobile-step-actions">
+                  <button type="button" onClick={() => setActiveStep(2)} disabled={!selectedEventId}>
+                    Continuar
+                  </button>
+                </div>
+              </section>}
 
-              <section className={`registration-step-card ${!selectedEventId ? "disabled" : ""}`}>
+              {!success && <section className={`registration-step-card wizard-step ${!selectedEventId ? "disabled" : ""} ${activeStep === 2 ? "active" : ""}`}>
                 <div className="step-card-head">
                   <span>2</span>
                   <div>
@@ -4734,6 +4795,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                     <select value={selectedCategory} onChange={(e) => setForm({ ...form, category: e.target.value })} disabled={!selectedEventId}>
                       {options.map((category) => <option key={category} value={category}>{category}</option>)}
                     </select>
+                    {selectedEvent && <small>{eventTypeLabels[selectedEvent.event_type] || "Solo hombres"}</small>}
                   </label>
                   <label className="form-field">
                     <span>Lado preferido</span>
@@ -4785,9 +4847,17 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                     )}
                   </div>
                 )}
-              </section>
+                <div className="mobile-step-actions split">
+                  <button type="button" className="secondary-action" onClick={() => setActiveStep(1)}>
+                    Atrás
+                  </button>
+                  <button type="button" onClick={() => setActiveStep(3)} disabled={!selectedEventId || (hasPartner && !form.partner_member_id)}>
+                    Continuar
+                  </button>
+                </div>
+              </section>}
 
-              <section className={`registration-step-card ${!selectedEventId ? "disabled" : ""}`}>
+              {!success && <section className={`registration-step-card wizard-step ${!selectedEventId ? "disabled" : ""} ${activeStep === 3 ? "active" : ""}`}>
                 <div className="step-card-head">
                   <span>3</span>
                   <div>
@@ -4824,10 +4894,15 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 <button className="registration-submit" disabled={loading || !canSubmitRegistration}>
                   <UserPlus size={16} /> {loading ? "Registrando..." : isWaitlist ? "Entrar a lista de espera" : "Confirmar inscripción"}
                 </button>
-              </section>
+                <div className="mobile-step-actions">
+                  <button type="button" className="secondary-action" onClick={() => setActiveStep(2)}>
+                    Atrás
+                  </button>
+                </div>
+              </section>}
             </main>
 
-            <aside className="registration-live-summary">
+            {!success && <aside className="registration-live-summary">
               <div className="summary-player-card">
                 <span>Jugador</span>
                 <strong>{authUser?.name || form.name}</strong>
@@ -4867,7 +4942,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                   )) : <p className="muted">Sin inscritos todavia</p>}
                 </div>
               </section>
-            </aside>
+            </aside>}
           </form>
         )}
       </div>
@@ -4876,7 +4951,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
 }
 
 function CategorySelect({ value, onChange }) {
-  const allCategories = [...categoryOptions.hombre, ...categoryOptions.mujer];
+  const allCategories = allPadelCategories;
   const hasCustomValue = value && !allCategories.includes(value);
 
   return (
@@ -4884,10 +4959,13 @@ function CategorySelect({ value, onChange }) {
       <option value="">Categoría</option>
       {hasCustomValue && <option value={value}>{value}</option>}
       <optgroup label="Hombres">
-        {categoryOptions.hombre.map((category) => <option key={`h-${category}`} value={category}>{category}</option>)}
+        {categoryOptions.hombres.map((category) => <option key={`h-${category}`} value={category}>{category}</option>)}
       </optgroup>
       <optgroup label="Mujeres">
-        {categoryOptions.mujer.map((category) => <option key={`f-${category}`} value={category}>{category}</option>)}
+        {categoryOptions.mujeres.map((category) => <option key={`f-${category}`} value={category}>{category}</option>)}
+      </optgroup>
+      <optgroup label="Mixto">
+        {categoryOptions.mixto.map((category) => <option key={`m-${category}`} value={category}>{category}</option>)}
       </optgroup>
     </select>
   );

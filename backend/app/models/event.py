@@ -16,6 +16,12 @@ class EventStatus(str, enum.Enum):
     finished = "finished"
 
 
+class EventType(str, enum.Enum):
+    hombres = "hombres"
+    mujeres = "mujeres"
+    mixto = "mixto"
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -28,6 +34,7 @@ class Event(Base):
     schedule: Mapped[str] = mapped_column(String(120), nullable=False)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     tournament_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType), default=EventType.hombres, nullable=False)
     category_configs: Mapped[list[dict]] = mapped_column(JSON, default=list)
     ranking_config: Mapped[dict] = mapped_column(JSON, default=dict)
     fixture_config: Mapped[dict] = mapped_column(JSON, default=dict)

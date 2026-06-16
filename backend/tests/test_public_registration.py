@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Event, EventPair, EventRegistration, PairStatus, PlayerPayment, RegistrationStatus, User, UserRole
+from app.models import Event, EventPair, EventRegistration, EventType, PairStatus, PlayerPayment, RegistrationStatus, User, UserRole
 from app.routers.public import register_player
 from app.schemas.public import PublicRegistrationRequest
 
@@ -67,17 +67,32 @@ class PublicRegistrationTest(unittest.TestCase):
         pairs = self.db.scalars(select(EventPair).where(EventPair.event_id == self.event.id)).all()
         self.assertEqual(len(pairs), 1)
 
+    def test_event_type_limits_public_registration_categories(self) -> None:
+        self.event.event_type = EventType.mujeres
+        self.event.categories = ""
+        self.db.commit()
+        vero = self._user("Vero", "vero@example.com")
+        cami = self._user("Cami", "cami@example.com")
+
+        registration = register_player(self.event.id, self._payload(vero, category="C+"), self.db, vero)
+
+        self.assertEqual(registration.pair.category, "C+")
+        with self.assertRaises(HTTPException) as raised:
+            register_player(self.event.id, self._payload(cami, category="5ta"), self.db, cami)
+        self.assertEqual(raised.exception.status_code, 400)
+
     def _payload(
         self,
         user: User,
         partner: User | None = None,
+        category: str = "5ta",
     ) -> PublicRegistrationRequest:
         return PublicRegistrationRequest(
             player_user_id=user.id,
             name=user.name,
             email=user.email,
             paid=True,
-            category="5ta",
+            category=category,
             partner_user_id=partner.id if partner else None,
             partner_name=partner.name if partner else None,
             partner_email=partner.email if partner else None,

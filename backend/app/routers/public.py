@@ -23,6 +23,12 @@ from app.services import sync_player_payments
 
 router = APIRouter(prefix="/public", tags=["public"])
 
+EVENT_TYPE_CATEGORIES = {
+    "hombres": ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
+    "mujeres": ["D+", "C+", "B+", "A+"],
+    "mixto": ["4ta C+", "5ta D+"],
+}
+
 
 @router.get("/members", response_model=list[PublicMemberRead])
 def list_members(db: Session = Depends(get_db)) -> list[User]:
@@ -51,6 +57,7 @@ def register_player(
         raise HTTPException(status_code=403, detail="No puedes inscribir a otro jugador desde esta cuenta")
     if payload.partner_name and payload.partner_name.strip() and not payload.partner_user_id:
         raise HTTPException(status_code=400, detail="El partner debe tener cuenta de jugador")
+    category = _validated_event_category(event, payload.category)
 
     player_one = _player_for_registration(
         db,
@@ -58,7 +65,7 @@ def register_player(
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
-        category=payload.category,
+        category=category,
         preferred_side=payload.preferred_side,
     )
     ensure_not_registered(db, event_id, player_one)
@@ -73,7 +80,7 @@ def register_player(
             name=payload.partner_name or "",
             email=payload.partner_email,
             phone=payload.partner_phone,
-            category=payload.category,
+            category=category,
             preferred_side=payload.partner_preferred_side,
         )
         ensure_different_players(player_one, player_two)
@@ -102,7 +109,7 @@ def register_player(
         event_id=event_id,
         player_one_id=player_one.id,
         player_two_id=player_two.id if player_two else None,
-        category=payload.category,
+        category=category,
         status=pair_status,
     )
     db.add(pair)
@@ -113,7 +120,7 @@ def register_player(
         pair_id=pair.id,
         player=player_one,
         role=RegistrationRole.jugador,
-        category=payload.category,
+        category=category,
         status=primary_registration_status,
         payment_status=PaymentStatus.pagado if payload.paid else PaymentStatus.pendiente,
     )
@@ -124,7 +131,7 @@ def register_player(
             pair_id=pair.id,
             player=player_two,
             role=RegistrationRole.partner,
-            category=payload.category,
+            category=category,
             status=partner_registration_status,
             payment_status=PaymentStatus.pagado if payload.partner_paid else PaymentStatus.pendiente,
         )
@@ -203,6 +210,25 @@ def join_pair(
     sync_player_payments(db, event_id)
     pair = db.scalar(select(EventPair).where(EventPair.id == pair.id))
     return PublicRegistrationResponse(pair=pair)
+
+
+def _validated_event_category(event: Event, category: str) -> str:
+    normalized_category = (category or "").strip()
+    configured_categories = [
+        item
+        for item in [
+            *[str(config.get("category", "")).strip() for config in (event.category_configs or []) if isinstance(config, dict)],
+            *[item.strip() for item in (event.categories or "").split("/")],
+        ]
+        if item
+    ]
+    event_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type or "hombres")
+    allowed_categories = list(dict.fromkeys(configured_categories or EVENT_TYPE_CATEGORIES.get(event_type, [])))
+    if not normalized_category:
+        raise HTTPException(status_code=400, detail="Selecciona una categoria para el evento")
+    if allowed_categories and normalized_category not in allowed_categories:
+        raise HTTPException(status_code=400, detail="La categoria no corresponde al tipo de evento")
+    return normalized_category
 
 
 def _player_for_registration(

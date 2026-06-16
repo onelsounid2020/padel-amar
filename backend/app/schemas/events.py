@@ -4,7 +4,7 @@ from datetime import date as DateType, datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.event import EventStatus
+from app.models.event import EventStatus, EventType
 from app.models.payment import PaymentStatus
 from app.models.registration import RegistrationRole, RegistrationStatus
 from app.schemas.common import ORMModel
@@ -20,6 +20,7 @@ class EventBase(BaseModel):
     schedule: str
     capacity: int = Field(gt=0)
     tournament_type: str
+    event_type: EventType = EventType.hombres
     category_configs: list[dict] = Field(default_factory=list)
     ranking_config: dict = Field(default_factory=dict)
     fixture_config: dict = Field(default_factory=dict)
@@ -41,6 +42,7 @@ class EventUpdate(BaseModel):
     schedule: str | None = None
     capacity: int | None = Field(default=None, gt=0)
     tournament_type: str | None = None
+    event_type: EventType | None = None
     category_configs: list[dict] | None = None
     ranking_config: dict | None = None
     fixture_config: dict | None = None
