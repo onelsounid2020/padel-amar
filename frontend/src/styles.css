@@ -3882,6 +3882,141 @@ h3 {
   grid-template-columns: minmax(280px, 390px) minmax(0, 1fr);
 }
 
+.player-results-page {
+  gap: 0;
+}
+
+.pr-header {
+  background: linear-gradient(135deg, #071f36, #0f6ea8 52%, #13a66f);
+  border-radius: 8px 8px 0 0;
+  color: #fff;
+  padding: 14px 16px 12px;
+}
+
+.pr-header-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.pr-header-info {
+  display: grid;
+  gap: 2px;
+}
+
+.pr-header-info strong {
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1.1;
+}
+
+.pr-header-info small {
+  color: #b8e8ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.pr-header .pr-header-row select {
+  background: rgb(255 255 255 / 0.12);
+  border-color: rgb(255 255 255 / 0.3);
+  border-radius: 7px;
+  color: #fff;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  max-width: 200px;
+  min-height: 34px;
+}
+
+.pr-tabs {
+  background: #fff;
+  border-bottom: 1px solid #d6e8f2;
+  display: flex;
+  gap: 0;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.pr-tabs button {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: #526670;
+  display: flex;
+  font-size: 0.88rem;
+  font-weight: 800;
+  gap: 6px;
+  min-height: 46px;
+  padding: 0 18px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pr-tabs button:hover {
+  color: #0f6ea8;
+}
+
+.pr-tabs button.active {
+  border-bottom-color: #13a66f;
+  color: #0a3154;
+}
+
+.pr-tabs button span {
+  background: #e8f3fa;
+  border-radius: 99px;
+  color: #0f6ea8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 1px 7px;
+}
+
+.pr-tabs button.active span {
+  background: #d4f0e4;
+  color: #0a6f54;
+}
+
+.pr-matches,
+.pr-ranking {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.pr-round-group {
+  display: grid;
+  gap: 6px;
+}
+
+.pr-round-header {
+  align-items: center;
+  border-left: 4px solid #13a66f;
+  display: flex;
+  gap: 10px;
+  padding: 4px 0 4px 10px;
+}
+
+.pr-round-header strong {
+  color: #08223b;
+  font-size: 0.9rem;
+}
+
+.pr-round-header span {
+  color: #0f6ea8;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.pr-round-header em {
+  color: #7a9aaa;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 700;
+  margin-left: auto;
+}
+
 .registration-shell {
   display: grid;
   gap: var(--section-gap);

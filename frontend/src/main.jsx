@@ -1234,6 +1234,7 @@ function App() {
       form={publicResultForm}
       setForm={setPublicResultForm}
       onSubmit={submitPublicResult}
+      onSubmitMatch={submitPlayerMatchResult}
       rankingConfig={rankingConfigForm}
       setRankingConfig={setRankingConfigForm}
       onSaveRanking={submitRankingConfig}
@@ -2451,6 +2452,7 @@ function PublicResults({
   form,
   setForm,
   onSubmit,
+  onSubmitMatch,
   rankingConfig,
   setRankingConfig,
   onSaveRanking,
@@ -2488,130 +2490,124 @@ function PublicResults({
     );
   }
 
-  const userMatches = authUser?.role === "jugador"
-    ? matches.filter((match) => {
-      const one = pairs.find((pair) => pair.id === match.pair_one_id);
-      const two = pairs.find((pair) => pair.id === match.pair_two_id);
-      return pairHasUser(one, authUser.id) || pairHasUser(two, authUser.id);
-    })
-    : [];
-  const roundNames = [...new Set(userMatches.map((match) => match.round_name || "Grupo"))];
-  const activeRound = form.round_name || roundNames[0] || "";
-  const visibleMatches = activeRound ? userMatches.filter((match) => (match.round_name || "Grupo") === activeRound) : userMatches;
-  const selectedMatch = visibleMatches.find((match) => match.id === Number(form.match_id));
-  const selectedSubmission = selectedMatch ? resultSubmissions.find((submission) => submission.match_id === selectedMatch.id && submission.submitted_by_user_id === authUser?.id) : null;
-  const pairOne = selectedMatch ? pairs.find((pair) => pair.id === selectedMatch.pair_one_id) : null;
-  const pairTwo = selectedMatch ? pairs.find((pair) => pair.id === selectedMatch.pair_two_id) : null;
-  const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
-  const standingsByCategory = standings.reduce((groups, standing) => {
-    const category = standing.pair.category || "Sin categoria";
-    groups[category] = [...(groups[category] || []), standing];
-    return groups;
-  }, {});
+  return (
+    <PlayerResultsView
+      events={events}
+      pairs={pairs}
+      matches={matches}
+      resultSubmissions={resultSubmissions}
+      standings={standings}
+      authUser={authUser}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={setSelectedEventId}
+      selectedEvent={selectedEvent}
+      onSubmitMatch={onSubmitMatch}
+      loading={loading}
+    />
+  );
+}
+
+function PlayerResultsView({
+  events,
+  pairs,
+  matches,
+  resultSubmissions,
+  standings,
+  authUser,
+  selectedEventId,
+  setSelectedEventId,
+  selectedEvent,
+  onSubmitMatch,
+  loading,
+}) {
+  const [activeTab, setActiveTab] = useState("matches");
+  const [scores, setScores] = useState({});
+
+  const pairById = useMemo(() => new Map(pairs.map((p) => [p.id, p])), [pairs]);
+  const myPair = useMemo(
+    () => (authUser?.role === "jugador" ? pairs.find((p) => pairHasUser(p, authUser.id)) : null),
+    [pairs, authUser],
+  );
+  const userMatches = useMemo(
+    () => (authUser?.role === "jugador"
+      ? matches.filter((m) => pairHasUser(pairById.get(m.pair_one_id), authUser.id) || pairHasUser(pairById.get(m.pair_two_id), authUser.id))
+      : []),
+    [matches, pairById, authUser],
+  );
+  const submissionByMatch = useMemo(
+    () => new Map(resultSubmissions.filter((s) => s.submitted_by_user_id === authUser?.id).map((s) => [s.match_id, s])),
+    [resultSubmissions, authUser],
+  );
+  const roundGroups = useMemo(() => {
+    const groups = new Map();
+    userMatches.forEach((match) => {
+      const key = match.round_name || "Partido";
+      if (!groups.has(key)) {
+        const parsed = parseFixtureRoundLabel(key);
+        groups.set(key, { key, label: parsed.turn || key, time: parsed.time, matches: [] });
+      }
+      groups.get(key).matches.push(match);
+    });
+    return [...groups.values()];
+  }, [userMatches]);
+  const standingsByCategory = useMemo(() => standings.reduce((acc, s) => {
+    const cat = s.pair.category || "Sin categoria";
+    acc[cat] = [...(acc[cat] || []), s];
+    return acc;
+  }, {}), [standings]);
+  const conflictCount = resultSubmissions.filter((s) => s.status === "conflicto").length;
+  const pendingCount = userMatches.filter((m) => !matchHasResult(m)).length;
+
+  useEffect(() => {
+    setScores(Object.fromEntries(
+      userMatches.map((m) => [m.id, {
+        pair_one_score: m.pair_one_score !== null && m.pair_one_score !== undefined ? String(m.pair_one_score) : "",
+        pair_two_score: m.pair_two_score !== null && m.pair_two_score !== undefined ? String(m.pair_two_score) : "",
+      }]),
+    ));
+  }, [matches]);
+
+  function setMatchScore(matchId, field, value) {
+    setScores((prev) => ({
+      ...prev,
+      [matchId]: {
+        pair_one_score: prev[matchId]?.pair_one_score ?? "",
+        pair_two_score: prev[matchId]?.pair_two_score ?? "",
+        [field]: String(Math.max(0, Number(value || 0))),
+      },
+    }));
+  }
+
+  function submitMatch(matchId) {
+    const s = scores[matchId] || {};
+    onSubmitMatch(matchId, s.pair_one_score, s.pair_two_score);
+  }
 
   return (
-    <section className="public-page">
-      <div className="public-hero results-hero">
-        <p className="eyebrow">Carga de resultados</p>
-        <h2>Anotar marcador del partido</h2>
-        <p>Solo puedes reportar resultados de tus partidos. Si otro jugador reporta algo distinto, la mesa verá una alerta.</p>
-      </div>
-
-      <div className="public-grid">
-        <aside className="panel">
-          <h2><ExternalLink size={18} /> Evento</h2>
-          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)} required>
-            <option value="">Seleccionar evento</option>
-            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+    <section className="public-page player-results-page">
+      <div className="pr-header">
+        <div className="pr-header-row">
+          <div className="pr-header-info">
+            <p className="eyebrow">Resultados</p>
+            <strong>{selectedEvent ? selectedEvent.name : "Selecciona un evento"}</strong>
+            {selectedEvent && <small>{selectedEvent.date}{selectedEvent.place ? ` · ${selectedEvent.place}` : ""}{selectedEvent.schedule ? ` · ${selectedEvent.schedule}` : ""}</small>}
+          </div>
+          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)}>
+            <option value="">Evento</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
           </select>
-          {selectedEvent && (
-            <div className="event-ticket">
-              <strong>{selectedEvent.name}</strong>
-              <span>{selectedEvent.date}</span>
-              <span>{selectedEvent.place}</span>
-              <span>{selectedEvent.schedule}</span>
-            </div>
-          )}
-        </aside>
-
-        <section className="panel">
-          <h2><FileCheck2 size={18} /> Resultado</h2>
-          {authUser?.role !== "jugador" ? (
-            <div className="result-state-card">
-              <strong>Cuenta jugador requerida</strong>
-              <span>Entra con tu cuenta jugador para reportar solo tus partidos.</span>
-            </div>
-          ) : !userMatches.length ? (
-            <div className="result-state-card">
-              <strong>Sin partidos asignados</strong>
-              <span>No encontramos partidos vinculados a tu cuenta en este evento.</span>
-            </div>
-          ) : (
-          <form onSubmit={onSubmit} className="score-form">
-            <select
-              value={activeRound}
-              onChange={(e) => setForm({ ...form, round_name: e.target.value, match_id: "", pair_one_score: "", pair_two_score: "" })}
-              required
-            >
-              {roundNames.length ? (
-                roundNames.map((roundName, index) => (
-                  <option key={roundName} value={roundName}>Ronda {index + 1}</option>
-                ))
-              ) : (
-                <option value="">Sin rondas disponibles</option>
-              )}
-            </select>
-            <select value={form.match_id} onChange={(e) => setForm({ ...form, match_id: e.target.value })} required>
-              <option value="">Seleccionar partido</option>
-              {visibleMatches.map((match) => {
-                const one = pairs.find((pair) => pair.id === match.pair_one_id);
-                const two = pairs.find((pair) => pair.id === match.pair_two_id);
-                const label = `${one ? pairName(one) : `Pareja ${match.pair_one_id}`} vs ${two ? pairName(two) : `Pareja ${match.pair_two_id}`}`;
-                return <option key={match.id} value={match.id}>{label}</option>;
-              })}
-            </select>
-
-            {selectedMatch && (
-              <>
-              {selectedSubmission && (
-                <div className={`result-state-card ${selectedSubmission.status}`}>
-                  <strong>{selectedSubmission.status === "conflicto" ? "Resultado en conflicto" : selectedSubmission.status === "confirmado" ? "Resultado confirmado" : "Resultado pendiente"}</strong>
-                  <span>Tu reporte: {selectedSubmission.pair_one_score}-{selectedSubmission.pair_two_score}</span>
-                </div>
-              )}
-              <div className="scoreboard">
-                <div>
-                  <span>{pairOne ? pairName(pairOne) : "Pareja 1"}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={form.pair_one_score}
-                    onChange={(e) => setForm({ ...form, pair_one_score: e.target.value })}
-                    required
-                  />
-                </div>
-                <strong>VS</strong>
-                <div>
-                  <span>{pairTwo ? pairName(pairTwo) : "Pareja 2"}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={form.pair_two_score}
-                    onChange={(e) => setForm({ ...form, pair_two_score: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-              </>
-            )}
-
-            <button disabled={!selectedEventId || !form.match_id}><FileCheck2 size={16} /> Reportar resultado</button>
-          </form>
-          )}
-        </section>
+        </div>
       </div>
+
+      <nav className="pr-tabs">
+        <button type="button" className={activeTab === "matches" ? "active" : ""} onClick={() => setActiveTab("matches")}>
+          <FileCheck2 size={16} /> Mis partidos
+          {pendingCount > 0 && <span>{pendingCount}</span>}
+        </button>
+        <button type="button" className={activeTab === "ranking" ? "active" : ""} onClick={() => setActiveTab("ranking")}>
+          <Medal size={16} /> Ranking
+        </button>
+      </nav>
 
       {conflictCount > 0 && (
         <div className="fixture-collision-alert">
@@ -2620,26 +2616,53 @@ function PublicResults({
         </div>
       )}
 
-      <section className="panel">
-        <h2><Medal size={18} /> Ranking por categoría</h2>
-        <div className="ranking-grid">
-          {Object.entries(standingsByCategory).length ? (
-            Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
+      {activeTab === "matches" && (
+        <div className="pr-matches">
+          {authUser?.role !== "jugador" ? (
+            <div className="result-state-card"><strong>Cuenta jugador requerida</strong><span>Entra con tu cuenta jugador para ver y reportar tus partidos.</span></div>
+          ) : !selectedEvent ? (
+            <div className="result-state-card"><strong>Selecciona un evento</strong><span>Elige el evento en el selector de arriba.</span></div>
+          ) : !userMatches.length ? (
+            <div className="result-state-card"><strong>Sin partidos asignados</strong><span>Cuando la organización genere el fixture, tus partidos aparecerán aquí.</span></div>
+          ) : roundGroups.map((group) => (
+            <div key={group.key} className="pr-round-group">
+              <div className="pr-round-header">
+                <strong>{group.label}</strong>
+                {group.time && <span>{group.time}</span>}
+                <em>{group.matches.filter((m) => matchHasResult(m)).length}/{group.matches.length} jugados</em>
+              </div>
+              {group.matches.map((match) => (
+                <PlayerMatchCard
+                  key={match.id}
+                  match={match}
+                  pairById={pairById}
+                  myPairId={myPair?.id}
+                  submission={submissionByMatch.get(match.id)}
+                  score={scores[match.id] || { pair_one_score: "", pair_two_score: "" }}
+                  setScore={setMatchScore}
+                  onSubmit={submitMatch}
+                  loading={loading}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === "ranking" && (
+        <div className="pr-ranking">
+          <div className="ranking-grid">
+            {Object.entries(standingsByCategory).length ? Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
               <article className="ranking-table" key={category}>
                 <div className="ranking-title">
                   <strong>{category}</strong>
                   <span>{categoryStandings.length} parejas</span>
                 </div>
                 <div className="ranking-row ranking-header">
-                  <span>#</span>
-                  <span>Pareja</span>
-                  <span>J</span>
-                  <span>G</span>
-                  <span>Pts</span>
-                  <span>Dif</span>
+                  <span>#</span><span>Pareja</span><span>J</span><span>G</span><span>Pts</span><span>Dif</span>
                 </div>
                 {categoryStandings.map((standing) => (
-                  <div className="ranking-row" key={standing.id}>
+                  <div className={`ranking-row${standing.pair_id === myPair?.id ? " me" : ""}`} key={standing.id}>
                     <span>{standing.position}</span>
                     <span className="ranking-pair-name">
                       <span className="pair-names">
@@ -2654,12 +2677,12 @@ function PublicResults({
                   </div>
                 ))}
               </article>
-            ))
-          ) : (
-            <p className="empty">El ranking aparecerá cuando existan parejas o resultados cargados.</p>
-          )}
+            )) : (
+              <p className="empty">El ranking aparecerá cuando existan resultados cargados.</p>
+            )}
+          </div>
         </div>
-      </section>
+      )}
     </section>
   );
 }
