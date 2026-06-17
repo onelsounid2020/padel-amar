@@ -64,6 +64,13 @@ function normalizeScore(value) {
   return value === null || value === undefined ? "" : String(value);
 }
 
+function shortenPairName(fullName) {
+  return String(fullName || "")
+    .split(" / ")
+    .map((part) => part.trim().split(/\s+/).slice(0, 2).join(" "))
+    .join(" / ");
+}
+
 const padelScorePresets = [
   [6, 0],
   [6, 1],
@@ -355,16 +362,16 @@ export function TabletResults({
                   className={selectedWinner === "one" ? "active" : ""}
                   onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "one" }))}
                 >
-                  <span>Dupla 1</span>
-                  <strong>{row.pairOne}</strong>
+                  <span>1</span>
+                  <strong title={row.pairOne}>{shortenPairName(row.pairOne)}</strong>
                 </button>
                 <button
                   type="button"
                   className={selectedWinner === "two" ? "active" : ""}
                   onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "two" }))}
                 >
-                  <span>Dupla 2</span>
-                  <strong>{row.pairTwo}</strong>
+                  <span>2</span>
+                  <strong title={row.pairTwo}>{shortenPairName(row.pairTwo)}</strong>
                 </button>
               </div>
               <div className="tablet-presets" aria-label="Marcadores rápidos">

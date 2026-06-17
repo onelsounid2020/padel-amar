@@ -6419,27 +6419,27 @@ h3 {
 
 .tablet-match-grid {
   display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(auto-fit, minmax(288px, 1fr));
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
 }
 
 .tablet-match {
-  background: #fffefa;
-  border: 1px solid #c7d9e4;
-  border-radius: 8px;
-  box-shadow: 0 10px 18px rgb(20 53 78 / 0.1);
+  background: #ffffff;
+  border: 1px solid #d6e8f2;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgb(20 53 78 / 0.08);
   display: grid;
-  gap: 5px;
-  padding: 6px;
+  gap: 7px;
+  padding: 10px;
 }
 
 .tablet-match.done {
-  background: #f1fbf0;
-  border-color: #13a66f;
+  background: #f4fdf6;
+  border-color: #5fcb92;
 }
 
 .tablet-match.dirty {
-  background: #fff8e8;
+  background: #fffbf0;
   border-color: #f4b740;
 }
 
@@ -6452,34 +6452,43 @@ h3 {
   align-items: center;
   display: grid;
   gap: 4px;
-  grid-template-columns: minmax(74px, auto) minmax(66px, auto) minmax(0, 1fr);
-}
-
-.tablet-match-head span,
-.tablet-match-head strong,
-.tablet-match-head em {
-  border-radius: 7px;
-  font-size: 0.7rem;
-  font-style: normal;
-  font-weight: 900;
-  min-height: 24px;
-  padding: 4px 6px;
-  text-align: center;
+  grid-template-columns: auto 1fr auto;
 }
 
 .tablet-match-head span {
-  background: #eaf7fb;
+  background: #eaf5fb;
+  border-radius: 6px;
   color: #0e5d8f;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 3px 8px;
 }
 
 .tablet-match-head strong {
-  background: #a8e641;
-  color: #08223b;
+  background: linear-gradient(135deg, #0f6ea8, #13a66f);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 900;
+  justify-self: center;
+  letter-spacing: 0.04em;
+  padding: 4px 12px;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .tablet-match-head em {
   background: #08223b;
-  color: #ffffff;
+  border-radius: 6px;
+  color: #a8e641;
+  font-size: 0.65rem;
+  font-style: normal;
+  font-weight: 900;
+  max-width: 120px;
+  overflow: hidden;
+  padding: 3px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tablet-scoreboard {
@@ -6491,42 +6500,58 @@ h3 {
 .tablet-winner-pick {
   display: grid;
   gap: 5px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .tablet-winner-pick button {
-  background: #f4fbfe;
-  border: 2px solid #c7d9e4;
+  align-items: center;
+  background: #f5fafd;
+  border: 2px solid #c8dfe9;
+  border-radius: 10px;
   box-shadow: none;
   color: #08223b;
-  display: grid;
-  gap: 3px;
-  min-height: 62px;
-  padding: 7px;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
 }
 
 .tablet-winner-pick button span {
-  color: #526670;
-  font-size: 0.68rem;
+  background: #d4eaf5;
+  border-radius: 5px;
+  color: #2a6080;
+  flex-shrink: 0;
+  font-size: 0.7rem;
   font-weight: 900;
+  padding: 3px 7px;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .tablet-winner-pick button strong {
-  font-size: 0.84rem;
-  line-height: 1.1;
-  overflow-wrap: anywhere;
+  flex: 1;
+  font-size: 0.92rem;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tablet-winner-pick button.active {
-  background: #e9f8e0;
-  border-color: #78bf2a;
+  background: #e8f9ee;
+  border-color: #43b36a;
   color: #08223b;
 }
 
+.tablet-winner-pick button.active span {
+  background: #43b36a;
+  color: #fff;
+}
+
 .tablet-winner-pick button.active span::after {
-  content: " · ganadora";
-  color: #0a6f54;
+  content: " ✓";
 }
 
 .tablet-team {
@@ -6630,38 +6655,48 @@ h3 {
 }
 
 .tablet-presets button {
-  background: #eaf7fb;
-  border: 1px solid #c7d9e4;
+  background: #eaf4fb;
+  border: 1.5px solid #b8d6e8;
+  border-radius: 8px;
   box-shadow: none;
-  color: #08223b;
-  font-size: 0.82rem;
+  color: #0b4a72;
+  font-size: 0.88rem;
   font-weight: 900;
-  min-height: 34px;
-  padding: 0 4px;
+  min-height: 42px;
+  padding: 0 3px;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.tablet-presets button:hover,
+.tablet-presets button:active {
+  background: #1a7abf;
+  border-color: #1a7abf;
+  color: #fff;
 }
 
 .tablet-manual-score {
   align-items: center;
-  background: #f4fbfe;
-  border: 1px solid #d9e8f0;
+  background: #f7fbfe;
+  border: 1px solid #d6e8f2;
   border-radius: 8px;
   display: grid;
   gap: 5px;
-  grid-template-columns: minmax(88px, 1fr) 52px 12px 52px;
-  padding: 4px 6px;
+  grid-template-columns: 1fr 46px 14px 46px;
+  padding: 5px 8px;
 }
 
 .tablet-manual-score span {
-  color: #526670;
-  font-size: 0.72rem;
+  color: #5c788a;
+  font-size: 0.7rem;
   font-weight: 900;
   text-transform: uppercase;
 }
 
 .tablet-manual-score input {
-  font-size: 1.1rem;
+  border-radius: 6px;
+  font-size: 1.05rem;
   font-weight: 900;
-  min-height: 36px;
+  min-height: 34px;
   padding: 2px;
   text-align: center;
 }
@@ -6726,8 +6761,9 @@ h3 {
 }
 
 .tablet-save {
-  font-size: 0.84rem;
-  min-height: 36px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  min-height: 44px;
   padding: 0 8px;
 }
 
@@ -7288,7 +7324,7 @@ h3 {
 
 @media (max-width: 1023px) {
   .tablet-match-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   }
 
   .tablet-side-panels,
@@ -8983,9 +9019,6 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .tablet-match-head {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 420px) {
