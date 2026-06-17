@@ -939,6 +939,14 @@ function App() {
     });
   }
 
+  async function toggleFixtureVisible() {
+    if (!selectedEventId || !selectedEvent) return;
+    await run(async () => {
+      const updated = await api.updateEvent(selectedEventId, { fixture_visible: !selectedEvent.fixture_visible });
+      setEvents((prev) => prev.map((ev) => ev.id === updated.id ? updated : ev));
+    });
+  }
+
   async function finishSelectedEvent() {
     if (!selectedEventId || !selectedEvent) return;
     const pendingMatches = matches.filter((match) => !matchHasResult(match)).length;
@@ -1241,6 +1249,7 @@ function App() {
       onOfficialResult={submitOfficialResult}
       onGenerateFinalFixture={submitFinalRankingFixture}
       onFinishEvent={finishSelectedEvent}
+      onToggleFixtureVisible={toggleFixtureVisible}
       onRefresh={() => run(loadEventData)}
       loading={loading}
       canEditScores={canAccess("tablet")}
@@ -2459,6 +2468,7 @@ function PublicResults({
   onOfficialResult,
   onGenerateFinalFixture,
   onFinishEvent,
+  onToggleFixtureVisible,
   onRefresh,
   loading,
   canEditScores,
@@ -2482,6 +2492,7 @@ function PublicResults({
         onOfficialResult={onOfficialResult}
         onGenerateFinalFixture={onGenerateFinalFixture}
         onFinishEvent={onFinishEvent}
+        onToggleFixtureVisible={onToggleFixtureVisible}
         onRefresh={onRefresh}
         loading={loading}
         canEditScores={canEditScores}
@@ -2622,6 +2633,8 @@ function PlayerResultsView({
             <div className="result-state-card"><strong>Cuenta jugador requerida</strong><span>Entra con tu cuenta jugador para ver y reportar tus partidos.</span></div>
           ) : !selectedEvent ? (
             <div className="result-state-card"><strong>Selecciona un evento</strong><span>Elige el evento en el selector de arriba.</span></div>
+          ) : !selectedEvent.fixture_visible ? (
+            <div className="result-state-card"><strong>Partidos no publicados aún</strong><span>La organización aún no ha publicado el fixture. Vuelve más tarde.</span></div>
           ) : !userMatches.length ? (
             <div className="result-state-card"><strong>Sin partidos asignados</strong><span>Cuando la organización genere el fixture, tus partidos aparecerán aquí.</span></div>
           ) : roundGroups.map((group) => (
@@ -2703,6 +2716,7 @@ function ResultsControlCenter({
   onOfficialResult,
   onGenerateFinalFixture,
   onFinishEvent,
+  onToggleFixtureVisible,
   onRefresh,
   loading,
   canEditScores,
@@ -2844,6 +2858,23 @@ function ResultsControlCenter({
 
           {activeView === "scores" && (
             <section className="results-score-workspace">
+              <div className={`fixture-visibility-bar ${selectedEvent?.fixture_visible ? "visible" : "hidden"}`}>
+                <div className="fixture-visibility-info">
+                  {selectedEvent?.fixture_visible ? (
+                    <><Eye size={16} /><span>El fixture y los partidos son <strong>visibles</strong> para los jugadores</span></>
+                  ) : (
+                    <><EyeOff size={16} /><span>El fixture está <strong>oculto</strong> para los jugadores</span></>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={`fixture-visibility-toggle ${selectedEvent?.fixture_visible ? "on" : "off"}`}
+                  onClick={onToggleFixtureVisible}
+                  disabled={loading}
+                >
+                  {selectedEvent?.fixture_visible ? <><EyeOff size={15} /> Ocultar a jugadores</> : <><Eye size={15} /> Hacer visible</>}
+                </button>
+              </div>
               <div className="results-category-tabs" role="group" aria-label="Filtrar por categoría">
                 <button className={categoryFilter === "all" ? "active" : ""} type="button" onClick={() => setCategoryFilter("all")}>Todas <span>{matches.length}</span></button>
                 {categories.map((category) => {

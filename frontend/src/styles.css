@@ -5178,6 +5178,71 @@ h3 {
   gap: 12px;
 }
 
+.fixture-visibility-bar {
+  align-items: center;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.fixture-visibility-bar.visible {
+  background: #eaf8f0;
+  border: 1.5px solid #8de0b9;
+}
+
+.fixture-visibility-bar.hidden {
+  background: #f3f6f9;
+  border: 1.5px solid #c8d8e4;
+}
+
+.fixture-visibility-info {
+  align-items: center;
+  display: flex;
+  font-size: 0.85rem;
+  gap: 8px;
+}
+
+.fixture-visibility-bar.visible .fixture-visibility-info {
+  color: #0a6f54;
+}
+
+.fixture-visibility-bar.hidden .fixture-visibility-info {
+  color: #4a7080;
+}
+
+.fixture-visibility-info strong {
+  font-weight: 900;
+}
+
+.fixture-visibility-toggle {
+  border-radius: 8px;
+  flex-shrink: 0;
+  font-size: 0.83rem;
+  font-weight: 800;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.fixture-visibility-toggle.on {
+  background: #d4f0e4;
+  border-color: #8de0b9;
+  color: #0a6f54;
+}
+
+.fixture-visibility-toggle.off {
+  background: #0f6ea8;
+  border-color: #0f6ea8;
+  color: #fff;
+}
+
+.fixture-visibility-toggle.off:hover {
+  background: #0a5a8a;
+  border-color: #0a5a8a;
+}
+
 .results-category-tabs {
   display: flex;
   gap: 6px;

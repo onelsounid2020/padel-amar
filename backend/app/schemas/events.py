@@ -27,6 +27,7 @@ class EventBase(BaseModel):
     description: str | None = None
     status: EventStatus = EventStatus.registration_open
     is_active: bool = True
+    fixture_visible: bool = False
 
 
 class EventCreate(EventBase):
@@ -49,6 +50,7 @@ class EventUpdate(BaseModel):
     description: str | None = None
     status: EventStatus | None = None
     is_active: bool | None = None
+    fixture_visible: bool | None = None
 
 
 class EventRead(EventBase, ORMModel):

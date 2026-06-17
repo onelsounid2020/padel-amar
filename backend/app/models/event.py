@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -41,6 +41,7 @@ class Event(Base):
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.registration_open, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True)
+    fixture_visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     pairs = relationship("EventPair", back_populates="event", cascade="all, delete-orphan")
