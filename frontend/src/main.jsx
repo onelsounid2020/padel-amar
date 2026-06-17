@@ -645,7 +645,13 @@ function App() {
   }, [selectedEventId]);
 
   useEffect(() => {
-    if (!["events", "results"].includes(page) || !selectedEventId || !authUser || !canAccess(page === "events" ? "events" : "results")) return undefined;
+    const pageNeedsLiveData = {
+      events: canAccess("events"),
+      matches: canAccess("events"),
+      results: canAccess("results"),
+      tablet: canAccess("tablet"),
+    };
+    if (!pageNeedsLiveData[page] || !selectedEventId || !authUser) return undefined;
     const interval = window.setInterval(() => {
       Promise.all([
         loadBase().catch((err) => setError(err.message)),
@@ -653,7 +659,7 @@ function App() {
       ]);
     }, 8000);
     return () => window.clearInterval(interval);
-  }, [page, selectedEventId, authUser?.id, currentPermissions.events, currentPermissions.results]);
+  }, [page, selectedEventId, authUser?.id, currentPermissions.events, currentPermissions.results, currentPermissions.tablet]);
 
   useEffect(() => {
     if (page === "events") return;

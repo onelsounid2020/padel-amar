@@ -120,7 +120,7 @@ def _validate_match_pairs(db: Session, event_id: int, matches: list[MatchCreate]
 
 @router.get("", response_model=list[MatchRead])
 def list_matches(event_id: int, db: Session = Depends(get_db)) -> list[Match]:
-    return list(db.scalars(select(Match).where(Match.event_id == event_id).order_by(Match.created_at)))
+    return list(db.scalars(select(Match).where(Match.event_id == event_id).order_by(Match.id)))
 
 
 @router.post("/generate-fixture", response_model=list[MatchRead], status_code=201)
