@@ -3991,29 +3991,21 @@ function printAmericanoCategory(category, preview) {
     .filter((round) => round.matches.length || round.resting.length);
   const categoryMatchCount = categoryRounds.reduce((sum, round) => sum + round.matches.length, 0);
   const maxMatchesInRound = Math.max(1, ...categoryRounds.map((round) => round.matches.length));
-  const printColumns = Math.min(5, Math.max(2, maxMatchesInRound));
-  const densityClass = categoryMatchCount > 24 ? "dense" : categoryMatchCount > 15 ? "compact" : "";
 
   const rows = categoryRounds.map((round) => `
     <section class="round">
       <header>
         <strong>R${round.round}</strong>
-        <span>${htmlEscape(round.start_time)}-${htmlEscape(round.end_time)}</span>
+        <span>${htmlEscape(round.start_time)}&ndash;${htmlEscape(round.end_time)}</span>
         ${round.resting.length ? `<small>Descansan: ${round.resting.map((pair) => htmlEscape(pair.shortName)).join(", ")}</small>` : ""}
       </header>
       <div class="matches">
         ${round.matches.map((match) => `
           <article class="match">
-            <span>Cancha ${htmlEscape(match.court)}</span>
-            <div class="score-line">
-              <div class="pair" style="background:${htmlEscape(match.pair_one.color)}">${htmlEscape(match.pair_one.shortName)}</div>
-              <i></i>
-            </div>
-            <b>vs</b>
-            <div class="score-line">
-              <div class="pair" style="background:${htmlEscape(match.pair_two.color)}">${htmlEscape(match.pair_two.shortName)}</div>
-              <i></i>
-            </div>
+            <div class="court">C${htmlEscape(String(match.court))}</div>
+            <div class="pair" style="background:${htmlEscape(match.pair_one.color)}">${htmlEscape(match.pair_one.shortName)}<i></i></div>
+            <div class="sep">vs</div>
+            <div class="pair" style="background:${htmlEscape(match.pair_two.color)}">${htmlEscape(match.pair_two.shortName)}<i></i></div>
           </article>
         `).join("")}
       </div>
@@ -4031,49 +4023,27 @@ function printAmericanoCategory(category, preview) {
       <head>
         <title>Programación ${htmlEscape(category)}</title>
         <style>
-          @page { size: A4 landscape; margin: 7mm; }
+          @page { size: A4 landscape; margin: 8mm; }
           * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-          body { --print-cols: ${printColumns}; color: #08223b; font-family: Arial, sans-serif; margin: 14px; }
-          h1 { font-size: 21px; margin: 0 0 3px; }
-          .subtitle { color: #526670; font-size: 12px; font-weight: 700; margin: 0 0 10px; }
-          .round { border: 1px solid #c7d9e4; border-radius: 7px; margin-bottom: 7px; padding: 7px; break-inside: avoid; }
-          .round header { align-items: center; border-bottom: 1px solid #d9e8f0; display: grid; gap: 8px; grid-template-columns: 42px 92px 1fr; margin-bottom: 6px; padding-bottom: 5px; }
-          .round header strong { font-size: 16px; }
-          .round header span, .round header small { color: #526670; font-size: 11px; font-weight: 800; }
-          .matches { display: grid; gap: 6px; grid-template-columns: repeat(var(--print-cols), minmax(0, 1fr)); }
-          .match { background: #f4fbff; border-left: 4px solid #13a66f; border-radius: 7px; display: grid; gap: 4px; padding: 6px; }
-          .match span { color: #0e5d8f; font-size: 10px; font-weight: 900; text-transform: uppercase; }
-          .match b { color: #526670; font-size: 10px; text-transform: uppercase; }
-          .pair { border: 1px solid rgba(8, 34, 59, 0.14); border-radius: 6px; font-size: 11px; font-weight: 800; line-height: 1.1; min-height: 30px; padding: 5px; }
-          .score-line { align-items: stretch; display: grid; gap: 5px; grid-template-columns: minmax(0, 1fr) 34px; }
-          .score-line i { background: #ffffff; border: 2px solid #08223b; border-radius: 6px; display: block; min-height: 30px; }
-          body.compact h1 { font-size: 18px; }
-          body.compact .subtitle { margin-bottom: 7px; }
-          body.compact .round { margin-bottom: 5px; padding: 5px; }
-          body.compact .round header { margin-bottom: 4px; padding-bottom: 4px; }
-          body.compact .pair { font-size: 10px; min-height: 26px; padding: 4px; }
-          body.compact .score-line { grid-template-columns: minmax(0, 1fr) 30px; }
-          body.compact .score-line i { min-height: 26px; }
-          body.dense h1 { font-size: 16px; }
-          body.dense .subtitle { font-size: 10px; margin-bottom: 5px; }
-          body.dense .round { margin-bottom: 4px; padding: 4px; }
-          body.dense .round header { grid-template-columns: 34px 78px 1fr; gap: 5px; margin-bottom: 3px; padding-bottom: 3px; }
-          body.dense .round header strong { font-size: 13px; }
-          body.dense .round header span, body.dense .round header small { font-size: 9px; }
-          body.dense .matches { gap: 4px; }
-          body.dense .match { gap: 2px; padding: 4px; }
-          body.dense .match span, body.dense .match b { font-size: 8px; }
-          body.dense .pair { font-size: 9px; min-height: 22px; padding: 3px; }
-          body.dense .score-line { gap: 3px; grid-template-columns: minmax(0, 1fr) 24px; }
-          body.dense .score-line i { border-width: 1.5px; min-height: 22px; }
-          @media print {
-            body { margin: 0; }
-          }
+          body { color: #08223b; font-family: Arial, sans-serif; margin: 0; }
+          h1 { font-size: 14px; margin: 0 0 1px; }
+          .subtitle { color: #526670; font-size: 9px; font-weight: 700; margin: 0 0 5px; }
+          .round { border: 1px solid #c7d9e4; border-radius: 5px; break-inside: avoid; margin-bottom: 4px; padding: 4px 5px; page-break-inside: avoid; }
+          .round header { align-items: center; border-bottom: 1px solid #dae8f0; display: flex; gap: 6px; margin-bottom: 3px; padding-bottom: 2px; }
+          .round header strong { font-size: 11px; min-width: 26px; }
+          .round header span, .round header small { color: #526670; font-size: 8px; font-weight: 800; }
+          .matches { display: grid; gap: 3px; grid-template-columns: repeat(${maxMatchesInRound}, minmax(0, 1fr)); }
+          .match { border-left: 3px solid #13a66f; border-radius: 3px; display: grid; gap: 1px; padding: 3px 4px; }
+          .court { color: #0e5d8f; font-size: 7px; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase; }
+          .pair { align-items: center; border-radius: 3px; display: grid; font-size: 8px; font-weight: 800; gap: 2px; grid-template-columns: 1fr 18px; line-height: 1.1; padding: 2px 3px; }
+          .pair i { background: #fff; border: 1.5px solid #08223b; border-radius: 2px; display: block; height: 18px; }
+          .sep { color: #888; font-size: 7px; font-weight: 900; text-align: center; }
+          @media print { body { margin: 0; } }
         </style>
       </head>
-      <body class="${densityClass}">
+      <body>
         <h1>Programación ${htmlEscape(category)}</h1>
-        <p class="subtitle">${htmlEscape(preview.timeWindow)} · ${categoryMatchCount} partidos</p>
+        <p class="subtitle">${htmlEscape(preview.timeWindow)} &middot; ${categoryMatchCount} partidos</p>
         ${rows || "<p>No hay partidos para esta categoría.</p>"}
       </body>
     </html>
