@@ -70,6 +70,7 @@ const defaultFixtureConfig = {
   planner_rounds: 5,
   planner_courts: "1, 2, 3",
   planner_replace_unplayed: true,
+  category_court_preferences: {},
 };
 
 const FIXTURE_PRESETS_KEY = "amar_fixture_presets";
@@ -748,7 +749,7 @@ function App() {
 
   async function submitGenerateFixture() {
     await run(async () => {
-      const courts = fixtureForm.courts.split(",").map((court) => court.trim()).filter(Boolean);
+      const courts = parseCourtList(fixtureForm.courts);
       const timing = deriveFixtureTiming(selectedEvent?.schedule || eventForm.schedule, Number(fixtureForm.warmup_minutes || 0));
       const isGroupsWithFinals = fixtureForm.mode === "groups_finals";
       await api.generateFixture(selectedEventId, isGroupsWithFinals ? 3 : Number(fixtureForm.guaranteed_matches), courts, {
@@ -763,7 +764,7 @@ function App() {
 
   async function submitGenerateBracket() {
     await run(async () => {
-      const courts = fixtureForm.courts.split(",").map((court) => court.trim()).filter(Boolean);
+      const courts = parseCourtList(fixtureForm.courts);
       await api.generateBracket(selectedEventId, courts);
     });
   }
@@ -1302,6 +1303,7 @@ function App() {
       updateRegistration={updateRegistration}
       confirmAction={confirmAction}
       authUser={authUser}
+      loading={loading}
       run={run}
       forcedTab="matches"
     /> : <AccessDenied moduleName="Partidos" />
@@ -1375,6 +1377,7 @@ function App() {
       updateRegistration={updateRegistration}
       confirmAction={confirmAction}
       authUser={authUser}
+      loading={loading}
       run={run}
     /> : <AccessDenied moduleName="Eventos" />
   );
@@ -2987,6 +2990,7 @@ function EventsPage(props) {
     updateRegistration,
     confirmAction,
     authUser,
+    loading,
     run,
     forcedTab,
   } = props;
@@ -3194,7 +3198,15 @@ function EventsPage(props) {
                 <div className="block-head">
                   <h3><Swords size={16} /> Partidos</h3>
                 </div>
+                {fixtureSaveState !== "idle" && (
+                  <div className={`fixture-save-state ${fixtureSaveState}`}>
+                    {fixtureSaveState === "saving" && "Guardando configuración de partidos..."}
+                    {fixtureSaveState === "saved" && "Configuración de partidos guardada."}
+                    {fixtureSaveState === "error" && "No se pudo guardar la configuración de partidos."}
+                  </div>
+                )}
                 <TournamentSetupPanel
+                  eventId={selectedEventId}
                   selectedEvent={selectedEvent}
                   pairs={pairs}
                   registrations={registrations}
@@ -3203,6 +3215,10 @@ function EventsPage(props) {
                   setFixtureForm={setFixtureForm}
                   fixtureTiming={fixtureTiming}
                   configuredCourts={configuredCourts}
+                  loading={loading}
+                  onGenerateFixture={submitGenerateFixture}
+                  onGenerateBracket={submitGenerateBracket}
+                  onChange={run}
                 />
               </div>
             </div>
@@ -3272,7 +3288,44 @@ function OperationsStatus({ pairs, payments, registrations, matches }) {
   );
 }
 
-function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matches, fixtureForm, setFixtureForm, fixtureTiming, configuredCourts }) {
+function fixtureFormatLabel(format) {
+  const labels = {
+    groups: "Grupos automaticos",
+    manual_groups: "Manual por grupos",
+    americano_inteligente: "Americano inteligente",
+    round_robin: "Todos contra todos",
+    groups_finals: "Grupos + finales",
+    timed_battles: "Batallas por nivel",
+    bracket: "Eliminacion directa",
+  };
+  return labels[format] || "Fixture configurado";
+}
+
+function oppositeCourtPreference(value) {
+  if (value === "odd") return "even";
+  if (value === "even") return "odd";
+  return "random";
+}
+
+function courtPreferenceLabel(value) {
+  if (value === "odd") return "Canchas impares";
+  if (value === "even") return "Canchas pares";
+  return "Random";
+}
+
+function TournamentSetupPanel({
+  eventId,
+  selectedEvent,
+  pairs,
+  registrations = [],
+  matches,
+  fixtureForm,
+  setFixtureForm,
+  fixtureTiming,
+  configuredCourts,
+  loading,
+  onChange,
+}) {
   const [userPresets, setUserPresets] = useState(() => loadFixturePresets());
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
@@ -3284,7 +3337,11 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
   const scheduledStart = scheduledStartMinutes.length ? Math.min(...scheduledStartMinutes) : null;
   const scheduledEnd = scheduledEndMinutes.length ? Math.max(...scheduledEndMinutes) : null;
   const scheduledCourts = [...new Set(scheduledRows.map((row) => row.court).filter(Boolean))];
-  const displayedStart = scheduledStart !== null && Number.isFinite(scheduledStart) ? minutesToTime(scheduledStart) : (fixtureForm.start_time || fixtureTiming.fixtureStart || "");
+  const configuredCourtNames = fixtureForm.courts?.trim()
+    ? parseCourtList(fixtureForm.courts)
+    : Array.from({ length: Math.max(1, Number(fixtureForm.court_count || 1)) }, (_, index) => String(index + 1));
+  const displayedCourtInput = configuredCourtNames.join(", ");
+  const displayedStart = scheduledStart !== null && Number.isFinite(scheduledStart) ? minutesToTime(scheduledStart) : (fixtureTiming.fixtureStart || fixtureForm.start_time || "");
   const displayedEnd = scheduledEnd ? minutesToTime(scheduledEnd) : (fixtureTiming.eventEnd || "");
   const effectiveMinutes = Number(fixtureForm.set_minutes || 20);
   const availableTurns = Math.max(1, Math.floor(Number(fixtureTiming.rentalMinutes || 0) / Math.max(1, effectiveMinutes)));
@@ -3294,12 +3351,33 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
   const guaranteedMatches = Math.ceil((planningPairs * Number(fixtureForm.guaranteed_matches || 1)) / 2);
   const finalMatches = Number(fixtureForm.include_finals || 0) ? Math.max(0, categories.length * 2) : 0;
   const totalMatchesToPlan = guaranteedMatches + finalMatches;
-  const recommendedCourts = Math.max(1, Math.ceil(totalMatchesToPlan / availableTurns));
-  const courtDelta = Math.max(0, recommendedCourts - Number(configuredCourts || 0));
+  const maxUsefulAmericanoCourts = Math.max(1, Math.floor(planningPairs / 2));
+  const rawRecommendedCourts = Math.max(1, Math.ceil(totalMatchesToPlan / availableTurns));
   const format = fixtureForm.mode || "manual_groups";
+  const recommendedCourts = format === "americano_inteligente"
+    ? Math.min(rawRecommendedCourts, maxUsefulAmericanoCourts)
+    : rawRecommendedCourts;
+  const courtDelta = Math.max(0, recommendedCourts - Number(configuredCourts || 0));
 
   function update(patch) {
     setFixtureForm({ ...fixtureForm, ...patch });
+  }
+
+  function updateCategoryCourtPreference(category, preference) {
+    const nextPreferences = {
+      ...(fixtureForm.category_court_preferences || {}),
+      [category]: preference,
+    };
+    if (categories.length === 2) {
+      const otherCategory = categories.find((item) => item.category !== category)?.category;
+      if (otherCategory) nextPreferences[otherCategory] = preference === "random" ? "random" : oppositeCourtPreference(preference);
+    }
+    update({ category_court_preferences: nextPreferences });
+  }
+
+  function useRecommendedCourts() {
+    const nextCourts = Array.from({ length: Math.max(1, recommendedCourts) }, (_, index) => String(index + 1));
+    update({ courts: nextCourts.join(", "), court_count: nextCourts.length, planner_courts: nextCourts.join(", ") });
   }
 
   function applyPreset(preset) {
@@ -3323,6 +3401,7 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         balance_mode: fixtureForm.balance_mode,
         courts: fixtureForm.courts,
         court_count: fixtureForm.court_count,
+        category_court_preferences: fixtureForm.category_court_preferences || {},
       },
     };
     const updated = [...userPresets, preset];
@@ -3401,6 +3480,7 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         <label className="form-field">
           <span>Formato</span>
           <select value={format} onChange={(event) => update({ mode: event.target.value })}>
+            <option value="groups">Grupos automáticos</option>
             <option value="manual_groups">Manual por grupos</option>
             <option value="americano_inteligente">Americano inteligente</option>
             <option value="round_robin">Todos contra todos</option>
@@ -3432,7 +3512,7 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         </label>
         <label className="form-field">
           <span>Canchas</span>
-          <input value={fixtureForm.courts} onChange={(event) => {
+          <input value={displayedCourtInput} onChange={(event) => {
             const courts = parseCourtList(event.target.value);
             update({ courts: event.target.value, court_count: courts.length, planner_courts: courts.join(", ") });
           }} />
@@ -3459,51 +3539,225 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         {categories.map((category) => {
           const minimumTurns = category.courtsPerRound ? category.roundCount : 0;
           const capacityOk = !minimumTurns || availableTurns >= minimumTurns;
+          const courtPreference = fixtureForm.category_court_preferences?.[category.category] || "random";
           return (
             <article className={capacityOk ? "ok" : "warning"} key={category.category}>
-              <strong>{category.category}</strong>
+              <div className="setup-category-title">
+                <strong>{category.category}</strong>
+                <label>
+                  <span>Canchas</span>
+                  <select value={courtPreference} onChange={(event) => updateCategoryCourtPreference(category.category, event.target.value)}>
+                    <option value="random">Random</option>
+                    <option value="odd">Impares</option>
+                    <option value="even">Pares</option>
+                  </select>
+                </label>
+              </div>
               <span>{category.pairCount} parejas · {category.totalMatches} cruces</span>
-              <small>{category.roundCount} rondas · {category.courtsPerRound} canchas simultáneas · nivel {pairLevelLabel(category.minLevel)}-{pairLevelLabel(category.maxLevel)}</small>
+              <small>{category.roundCount} rondas · {category.courtsPerRound} canchas simultáneas · {courtPreferenceLabel(courtPreference)} · nivel {pairLevelLabel(category.minLevel)}-{pairLevelLabel(category.maxLevel)}</small>
             </article>
           );
         })}
       </div>
 
-      {format === "americano_inteligente" && (
-        <AmericanoInteligentePanel
-          pairs={pairs}
-          registrations={registrations}
-          fixtureForm={fixtureForm}
-          fixtureTiming={fixtureTiming}
-          configuredCourts={configuredCourts}
-        />
-      )}
+      <div className="fixture-action-bar">
+        <div>
+          <strong>Acción del formato</strong>
+          <span>Revisa la simulación y guarda esos cruces como partidos.</span>
+        </div>
+        {courtDelta > 0 && (
+          <button type="button" className="secondary-action" onClick={useRecommendedCourts}>
+            Usar {recommendedCourts} canchas
+          </button>
+        )}
+      </div>
+
+      <FixtureBuilderPanel
+        eventId={eventId}
+        pairs={pairs}
+        fixtureForm={fixtureForm}
+        fixtureTiming={fixtureTiming}
+        configuredCourts={configuredCourts}
+        loading={loading}
+        onChange={onChange}
+      />
     </section>
   );
 }
 
-function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configuredCourts }) {
+function validateSwap(rounds, srcRoundIdx, srcMatchIdx, srcSide, dstRoundIdx, dstMatchIdx, dstSide) {
+  if (srcRoundIdx === dstRoundIdx && srcMatchIdx === dstMatchIdx) return { valid: true };
+  const srcMatch = rounds[srcRoundIdx]?.matches[srcMatchIdx];
+  const dstMatch = rounds[dstRoundIdx]?.matches[dstMatchIdx];
+  if (!srcMatch || !dstMatch) return { valid: false, reason: "Movimiento inválido" };
+  const srcPair = srcMatch[srcSide];
+  const dstPair = dstMatch[dstSide];
+  const srcOtherPair = srcMatch[srcSide === "pair_one" ? "pair_two" : "pair_one"];
+  const dstOtherPair = dstMatch[dstSide === "pair_one" ? "pair_two" : "pair_one"];
+  if (dstPair.category !== srcOtherPair.category) {
+    return { valid: false, reason: `Categorías distintas: ${dstPair.category} ≠ ${srcOtherPair.category}` };
+  }
+  if (srcPair.category !== dstOtherPair.category) {
+    return { valid: false, reason: `Categorías distintas: ${srcPair.category} ≠ ${dstOtherPair.category}` };
+  }
+  const existingKeys = new Set();
+  rounds.forEach((round, rIdx) => {
+    round.matches.forEach((match, mIdx) => {
+      if ((rIdx === srcRoundIdx && mIdx === srcMatchIdx) || (rIdx === dstRoundIdx && mIdx === dstMatchIdx)) return;
+      existingKeys.add(americanoPairMatchKey(match.pair_one, match.pair_two));
+    });
+  });
+  const newSrcKey = americanoPairMatchKey(dstPair, srcOtherPair);
+  const newDstKey = americanoPairMatchKey(srcPair, dstOtherPair);
+  if (existingKeys.has(newSrcKey)) {
+    return { valid: false, reason: `${dstPair.shortName} ya enfrenta a ${srcOtherPair.shortName} en otra ronda` };
+  }
+  if (existingKeys.has(newDstKey)) {
+    return { valid: false, reason: `${srcPair.shortName} ya enfrenta a ${dstOtherPair.shortName} en otra ronda` };
+  }
+  if (newSrcKey === newDstKey) {
+    return { valid: false, reason: "El intercambio crearía un partido duplicado" };
+  }
+  return { valid: true };
+}
+
+function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, configuredCourts, loading, onChange }) {
   const fixedPairs = useMemo(() => americanoFixedPairs(pairs), [pairs]);
   const courts = useMemo(() => parseCourtList(fixtureForm.courts).slice(0, Math.max(1, Number(configuredCourts || fixtureForm.court_count || 1))), [fixtureForm.courts, fixtureForm.court_count, configuredCourts]);
+  const formatLabel = fixtureFormatLabel(fixtureForm.mode);
   const preview = useMemo(() => generateFixedPairAmericanoFixture({
     pairs: fixedPairs,
     startTime: fixtureTiming.fixtureStart || fixtureForm.start_time,
     endTime: fixtureTiming.eventEnd,
     matchMinutes: Number(fixtureForm.set_minutes || 20),
     courts,
-  }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts]);
+    categoryCourtPreferences: fixtureForm.category_court_preferences || {},
+  }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts, fixtureForm.category_court_preferences]);
+
+  const [editableRounds, setEditableRounds] = useState(() => preview.rounds);
+  const dragRef = useRef(null);
+  const swapErrorRef = useRef(null);
+  const configKeyRef = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
+  const [swapError, setSwapError] = useState(null);
+
+  const configKey = [
+    fixedPairs.map((p) => p.id).sort((a, b) => a - b).join(","),
+    courts.join(","),
+    fixtureForm.set_minutes,
+    fixtureTiming.fixtureStart || fixtureForm.start_time,
+    fixtureTiming.eventEnd,
+    JSON.stringify(fixtureForm.category_court_preferences || {}),
+  ].join("|");
+
+  useEffect(() => {
+    if (configKeyRef.current !== configKey) {
+      configKeyRef.current = configKey;
+      setEditableRounds(preview.rounds);
+    }
+  }, [configKey, preview]);
+
+  const hasManualEdits = useMemo(() => editableRounds.some((r) => r.matches.some((m) => m.locked)), [editableRounds]);
+  const allMatches = useMemo(() => editableRounds.flatMap((r) => r.matches), [editableRounds]);
+  const liveStats = useMemo(() => computeRoundStats(editableRounds), [editableRounds]);
+  const duplicateMatchKeys = useMemo(() => {
+    const counts = new Map();
+    editableRounds.forEach((round) => {
+      round.matches.forEach((match) => {
+        const key = americanoPairMatchKey(match.pair_one, match.pair_two);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+    });
+    return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
+  }, [editableRounds]);
   const printableCategories = useMemo(() => (
-    [...new Set(preview.matches.flatMap((match) => [match.pair_one.category, match.pair_two.category]).filter(Boolean))]
+    [...new Set(allMatches.flatMap((match) => [match.pair_one.category, match.pair_two.category]).filter(Boolean))]
       .sort((left, right) => String(left).localeCompare(String(right), undefined, { numeric: true }))
-  ), [preview.matches]);
+  ), [allMatches]);
+  const canSavePreview = Boolean(eventId) && allMatches.length > 0 && !loading && liveStats.restPerRound === 0 && duplicateMatchKeys.size === 0;
+
+  function showSwapError(message) {
+    setSwapError(message);
+    if (swapErrorRef.current) clearTimeout(swapErrorRef.current);
+    swapErrorRef.current = setTimeout(() => setSwapError(null), 3500);
+  }
+
+  function saveAmericanoFixture() {
+    if (!canSavePreview) return;
+    const payload = allMatches.map((match) => ({
+      pair_one_id: Number(match.pair_one.pairId),
+      pair_two_id: Number(match.pair_two.pairId),
+      court: match.court,
+      round_name: `${match.pair_one.category || "Categoria"} - ${formatLabel} - Ronda ${match.round} - ${match.start_time}-${match.end_time}`,
+    }));
+    onChange(() => api.createMatchesBulk(eventId, payload, true));
+  }
+
+  function handleDragStart(e, roundIdx, matchIdx, side) {
+    dragRef.current = { roundIdx, matchIdx, side };
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDragOver(e, roundIdx, matchIdx, side) {
+    e.preventDefault();
+    const src = dragRef.current;
+    if (!src) return;
+    const isSelf = src.roundIdx === roundIdx && src.matchIdx === matchIdx && src.side === side;
+    const valid = isSelf || validateSwap(editableRounds, src.roundIdx, src.matchIdx, src.side, roundIdx, matchIdx, side).valid;
+    e.dataTransfer.dropEffect = valid ? "move" : "none";
+    const current = dragOver;
+    if (current?.roundIdx !== roundIdx || current?.matchIdx !== matchIdx || current?.side !== side || current?.valid !== valid) {
+      setDragOver({ roundIdx, matchIdx, side, valid });
+    }
+  }
+
+  function handleDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(null);
+  }
+
+  function handleDrop(e, dstRoundIdx, dstMatchIdx, dstSide) {
+    e.preventDefault();
+    setDragOver(null);
+    const src = dragRef.current;
+    if (!src) return;
+    const { roundIdx: srcRoundIdx, matchIdx: srcMatchIdx, side: srcSide } = src;
+    dragRef.current = null;
+    if (srcRoundIdx === dstRoundIdx && srcMatchIdx === dstMatchIdx && srcSide === dstSide) return;
+    const check = validateSwap(editableRounds, srcRoundIdx, srcMatchIdx, srcSide, dstRoundIdx, dstMatchIdx, dstSide);
+    if (!check.valid) {
+      showSwapError(check.reason);
+      return;
+    }
+    setEditableRounds((prev) => {
+      const next = prev.map((r) => ({ ...r, matches: r.matches.map((m) => ({ ...m })) }));
+      const srcMatch = next[srcRoundIdx].matches[srcMatchIdx];
+      const dstMatch = next[dstRoundIdx].matches[dstMatchIdx];
+      const srcPair = srcMatch[srcSide];
+      const dstPair = dstMatch[dstSide];
+      srcMatch[srcSide] = dstPair;
+      dstMatch[dstSide] = srcPair;
+      srcMatch.locked = true;
+      dstMatch.locked = true;
+      return next;
+    });
+  }
+
+  function handleDragEnd() {
+    setDragOver(null);
+    dragRef.current = null;
+  }
+
+  function resetEdits() {
+    setEditableRounds(preview.rounds);
+  }
 
   return (
     <section className="americano-panel">
       <div className="americano-head">
         <div>
-          <span>Motor Americano Inteligente</span>
+          <span>Constructor de fixture</span>
           <strong>{preview.summary}</strong>
-          <p>Duplas fijas durante todo el evento, descansos rotativos y cruces diversos entre parejas.</p>
+          <p>{formatLabel}: arrastra las parejas para ajustar el fixture antes de guardar.</p>
         </div>
         <div className={preview.warnings.length ? "setup-pill warning" : "setup-pill ok"}>
           {preview.warnings.length ? `${preview.warnings.length} ajuste${preview.warnings.length === 1 ? "" : "s"}` : "Listo para simular"}
@@ -3511,24 +3765,24 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
       </div>
 
       <div className="americano-metrics">
-        <article>
+        <article className={liveStats.restPerRound > 0 ? "warning" : undefined}>
           <span>Parejas</span>
           <strong>{fixedPairs.length}</strong>
-          <small>{preview.restPerRound} pareja{preview.restPerRound === 1 ? "" : "s"} descansan por ronda</small>
+          <small>{liveStats.restPerRound === 0 ? "Todas juegan por ronda" : `${liveStats.restPerRound} pareja${liveStats.restPerRound === 1 ? "" : "s"} descansan · ajusta canchas`}</small>
         </article>
         <article>
           <span>Rondas útiles</span>
-          <strong>{preview.rounds.length}</strong>
+          <strong>{editableRounds.length}</strong>
           <small>{preview.timeWindow}</small>
         </article>
         <article>
           <span>Partidos</span>
-          <strong>{preview.matches.length}</strong>
-          <small>{preview.matchesPerPairRange}</small>
+          <strong>{allMatches.length}</strong>
+          <small>{liveStats.matchesPerPairRange}</small>
         </article>
         <article>
           <span>Diversidad</span>
-          <strong>{preview.repeatSummary}</strong>
+          <strong>{liveStats.repeatSummary}</strong>
           <small>Cruces repetidos entre duplas</small>
         </article>
       </div>
@@ -3539,15 +3793,29 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
         </div>
       )}
 
+      {swapError && (
+        <div className="americano-swap-error">
+          {swapError}
+        </div>
+      )}
+
       {printableCategories.length > 0 && (
         <div className="americano-print-actions">
           <span>Imprimir programación</span>
+          <button type="button" disabled={!canSavePreview} onClick={saveAmericanoFixture}>
+            <Save size={16} /> Guardar partidos
+          </button>
+          {hasManualEdits && (
+            <button type="button" className="secondary-action" onClick={resetEdits}>
+              Resetear cambios
+            </button>
+          )}
           {printableCategories.map((category) => (
             <button
               type="button"
               className="secondary-action"
               key={`print-${category}`}
-              onClick={() => printAmericanoCategory(category, preview)}
+              onClick={() => printAmericanoCategory(category, { ...preview, rounds: editableRounds, matches: allMatches })}
             >
               Imprimir {category}
             </button>
@@ -3556,7 +3824,7 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
       )}
 
       <div className="americano-rounds">
-        {preview.rounds.length ? preview.rounds.map((round) => (
+        {editableRounds.length ? editableRounds.map((round, roundIdx) => (
           <article className="americano-round" key={`americano-r${round.round}`}>
             <header>
               <strong>R{round.round}</strong>
@@ -3564,14 +3832,47 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
               {round.resting.length > 0 && <small>Descansan: {round.resting.map((pair) => pair.shortName).join(", ")}</small>}
             </header>
             <div className="americano-match-grid">
-              {round.matches.map((match) => (
-                <div className="americano-match" key={`americano-r${round.round}-c${match.court}`}>
-                  <span>Cancha {match.court}</span>
-                  <AmericanoPairPill pair={match.pair_one} />
-                  <b>vs</b>
-                  <AmericanoPairPill pair={match.pair_two} />
-                </div>
-              ))}
+              {round.matches.map((match, matchIdx) => {
+                const matchKey = americanoPairMatchKey(match.pair_one, match.pair_two);
+                const isDuplicate = duplicateMatchKeys.has(matchKey);
+                const getDragOverValid = (side) => {
+                  if (!dragOver || dragOver.roundIdx !== roundIdx || dragOver.matchIdx !== matchIdx || dragOver.side !== side) return null;
+                  return dragOver.valid;
+                };
+                return (
+                  <div
+                    className={`americano-match${match.locked ? " americano-match--edited" : ""}${isDuplicate ? " americano-match--duplicate" : ""}`}
+                    key={`americano-r${round.round}-c${match.court}`}
+                  >
+                    <span>Cancha {match.court}{match.locked ? " ✎" : ""}</span>
+                    <DraggablePairPill
+                      pair={match.pair_one}
+                      roundIdx={roundIdx}
+                      matchIdx={matchIdx}
+                      side="pair_one"
+                      dragOverValid={getDragOverValid("pair_one")}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                    />
+                    <b>vs</b>
+                    <DraggablePairPill
+                      pair={match.pair_two}
+                      roundIdx={roundIdx}
+                      matchIdx={matchIdx}
+                      side="pair_two"
+                      dragOverValid={getDragOverValid("pair_two")}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </article>
         )) : (
@@ -3579,7 +3880,7 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
         )}
       </div>
 
-      {preview.pairStats.length > 0 && (
+      {liveStats.pairStats.length > 0 && (
         <div className="americano-table-wrap">
           <table className="americano-table">
             <thead>
@@ -3592,7 +3893,7 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
               </tr>
             </thead>
             <tbody>
-              {preview.pairStats.map((stat) => (
+              {liveStats.pairStats.map((stat) => (
                 <tr key={stat.id}>
                   <td>{stat.name}</td>
                   <td>{stat.category}</td>
@@ -3605,8 +3906,6 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
           </table>
         </div>
       )}
-
-      <p className="americano-note">Preview local: este formato ya respeta parejas fijas; el siguiente paso es guardar estos cruces como partidos reales.</p>
     </section>
   );
 }
@@ -3614,6 +3913,29 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
 function AmericanoPairPill({ pair }) {
   return (
     <div className="americano-pair-pill" style={{ "--pair-bg": pair.color }}>
+      <strong>{pair.shortName}</strong>
+      <small>{pair.category}</small>
+    </div>
+  );
+}
+
+function DraggablePairPill({ pair, roundIdx, matchIdx, side, dragOverValid, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
+  const dropClass = dragOverValid === true
+    ? " americano-pair-pill--drop-valid"
+    : dragOverValid === false
+      ? " americano-pair-pill--drop-invalid"
+      : "";
+  return (
+    <div
+      className={`americano-pair-pill americano-pair-pill--drag${dropClass}`}
+      style={{ "--pair-bg": pair.color }}
+      draggable
+      onDragStart={(e) => onDragStart(e, roundIdx, matchIdx, side)}
+      onDragOver={(e) => onDragOver(e, roundIdx, matchIdx, side)}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => onDrop(e, roundIdx, matchIdx, side)}
+      onDragEnd={onDragEnd}
+    >
       <strong>{pair.shortName}</strong>
       <small>{pair.category}</small>
     </div>
@@ -6340,7 +6662,56 @@ function americanoPairMatchKey(left, right) {
   return [left.id, right.id].sort().join("|");
 }
 
-function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, matchMinutes = 20, courts = [] }) {
+function courtNumber(court) {
+  const match = String(court || "").match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function courtMatchesPreference(court, preference) {
+  if (!preference || preference === "random") return true;
+  const number = courtNumber(court);
+  if (!number) return true;
+  return preference === "odd" ? number % 2 === 1 : number % 2 === 0;
+}
+
+function categoryAllowedOnCourt(category, court, preferences = {}) {
+  return courtMatchesPreference(court, preferences[category] || "random");
+}
+
+function pairCourtMoveCost(pair, court) {
+  if (!pair?.lastCourt) return 0;
+  if (String(pair.lastCourt) === String(court)) return 0;
+  const previous = courtNumber(pair.lastCourt);
+  const next = courtNumber(court);
+  if (!previous || !next) return 5;
+  const parityCost = previous % 2 === next % 2 ? 1 : 4;
+  return parityCost + (Math.abs(previous - next) * 0.15);
+}
+
+function circleRoundRobin(items) {
+  if (items.length < 2) return [];
+  const list = [...items];
+  if (list.length % 2 === 1) list.push(null);
+  const n = list.length;
+  const half = n / 2;
+  const fixed = list[n - 1];
+  const rotating = list.slice(0, n - 1);
+  const rounds = [];
+  for (let r = 0; r < n - 1; r++) {
+    const rotated = [...rotating.slice(r), ...rotating.slice(0, r)];
+    const round = [];
+    if (fixed !== null) round.push([fixed, rotated[0]]);
+    for (let i = 1; i < half; i++) {
+      const a = rotated[i];
+      const b = rotated[n - 1 - i];
+      if (a !== null && b !== null) round.push([a, b]);
+    }
+    rounds.push(round);
+  }
+  return rounds;
+}
+
+function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, matchMinutes = 20, courts = [], categoryCourtPreferences = {} }) {
   const warnings = [];
   const usableCourts = courts.length ? courts : ["1"];
   const start = minutesFromSlot(startTime || "17:00");
@@ -6372,58 +6743,73 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     acc[pair.category] = (acc[pair.category] || 0) + 1;
     return acc;
   }, {})).forEach(([category, count]) => {
+    const categoryCourts = usableCourts.filter((court) => categoryAllowedOnCourt(category, court, categoryCourtPreferences));
+    const requiredCourts = Math.floor(count / 2);
     if (count === 1) warnings.push(`${category} tiene solo 1 pareja; no puede generar cruces internos.`);
     else if (count % 2 !== 0) warnings.push(`${category} tiene cantidad impar; una pareja descansará por ronda.`);
+    if (categoryCourts.length && categoryCourts.length < requiredCourts) {
+      warnings.push(`${category} tiene ${categoryCourts.length} cancha${categoryCourts.length === 1 ? "" : "s"} preferida${categoryCourts.length === 1 ? "" : "s"} para ${requiredCourts} partidos simultáneos; ${requiredCourts - categoryCourts.length} pareja${requiredCourts - categoryCourts.length === 1 ? "" : "s"} usará${requiredCourts - categoryCourts.length === 1 ? "" : "n"} canchas alternativas.`);
+    }
+    if (!categoryCourts.length) warnings.push(`${category} no tiene canchas disponibles con la regla seleccionada.`);
   });
+
+  const categoryGroupMap = pairs.reduce((acc, pair) => {
+    (acc[pair.category] = acc[pair.category] || []).push(pair);
+    return acc;
+  }, {});
+  const categoryRRSchedules = Object.fromEntries(
+    Object.entries(categoryGroupMap).map(([cat, catPairs]) => [
+      cat,
+      circleRoundRobin([...catPairs].sort((a, b) => a.id - b.id)),
+    ])
+  );
 
   for (let roundIndex = 0; roundIndex < roundCount && courtsPerRound > 0; roundIndex += 1) {
     const roundStart = validStart + (roundIndex * minutesPerMatch);
     const usedThisRound = new Set();
+    const courtsUsedThisRound = new Set();
     const matches = [];
 
-    for (let courtIndex = 0; courtIndex < courtsPerRound; courtIndex += 1) {
-      let best = null;
-      const pool = pairs.filter((pair) => !usedThisRound.has(pair.id));
-      if (pool.length < 2) break;
-
-      pool.forEach((one, oneIndex) => {
-        pool.slice(oneIndex + 1).forEach((two) => {
-          if (one.category !== two.category) return;
-          const oneStats = stats.get(one.id);
-          const twoStats = stats.get(two.id);
-          const key = americanoPairMatchKey(one, two);
-          const score = (
-            ((matchupCounts.get(key) || 0) * 80)
-            + (Math.abs(oneStats.matches - twoStats.matches) * 12)
-            + (Math.abs(oneStats.rests - twoStats.rests) * 3)
-            + (Math.abs(one.level - two.level) * 2)
-            - ((oneStats.rests + twoStats.rests) * 0.5)
-          );
-          if (!best || score < best.score) best = { pair_one: one, pair_two: two, score };
-        });
+    const roundMatchups = [];
+    Object.values(categoryRRSchedules).forEach((schedule) => {
+      if (!schedule.length) return;
+      const catRound = schedule[roundIndex % schedule.length];
+      catRound.forEach(([p1, p2]) => {
+        if (p1 && p2) roundMatchups.push({ pair_one: p1, pair_two: p2 });
       });
+    });
 
-      if (!best) break;
+    roundMatchups.forEach(({ pair_one, pair_two }) => {
+      if (matches.length >= courtsPerRound) return;
+      const availableCourts = usableCourts.filter((c) => !courtsUsedThisRound.has(c));
+      if (!availableCourts.length) return;
+      const preferredCourts = availableCourts.filter((c) => categoryAllowedOnCourt(pair_one.category, c, categoryCourtPreferences));
+      const court = (preferredCourts.length > 0 ? preferredCourts : availableCourts)[0];
+
+      courtsUsedThisRound.add(court);
+      usedThisRound.add(pair_one.id);
+      usedThisRound.add(pair_two.id);
+      stats.get(pair_one.id).matches += 1;
+      stats.get(pair_two.id).matches += 1;
+      stats.get(pair_one.id).lastCourt = court;
+      stats.get(pair_two.id).lastCourt = court;
+      stats.get(pair_one.id).rivalsSet.add(pair_two.id);
+      stats.get(pair_two.id).rivalsSet.add(pair_one.id);
+      const key = americanoPairMatchKey(pair_one, pair_two);
+      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
 
       matches.push({
         round: roundIndex + 1,
-        court: usableCourts[courtIndex],
+        court,
         start_time: minutesToTime(roundStart),
         end_time: minutesToTime(roundStart + minutesPerMatch),
-        pair_one: best.pair_one,
-        pair_two: best.pair_two,
+        pair_one,
+        pair_two,
         locked: false,
       });
+    });
 
-      usedThisRound.add(best.pair_one.id);
-      usedThisRound.add(best.pair_two.id);
-      stats.get(best.pair_one.id).matches += 1;
-      stats.get(best.pair_two.id).matches += 1;
-      stats.get(best.pair_one.id).rivalsSet.add(best.pair_two.id);
-      stats.get(best.pair_two.id).rivalsSet.add(best.pair_one.id);
-      const key = americanoPairMatchKey(best.pair_one, best.pair_two);
-      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
-    }
+    matches.sort((a, b) => Number(a.court) - Number(b.court));
 
     const resting = pairs.filter((pair) => !usedThisRound.has(pair.id));
     resting.forEach((pair) => {
@@ -6453,6 +6839,7 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     .sort((left, right) => right.matches - left.matches || left.rests - right.rests || left.name.localeCompare(right.name));
   const matchCounts = pairStats.map((stat) => stat.matches);
   const repeatedMatchups = [...matchupCounts.values()].filter((count) => count > 1).length;
+  const actualCourtsPerRound = rounds.length > 0 ? Math.max(...rounds.map((round) => round.matches.length), 0) : 0;
 
   return {
     rounds,
@@ -6461,9 +6848,45 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     warnings,
     restPerRound: Math.max(0, pairs.length - (courtsPerRound * 2)),
     timeWindow: rounds.length ? `${rounds[0].start_time}-${rounds[rounds.length - 1].end_time}` : "Sin horario",
-    summary: `${matches.length} partidos · ${rounds.length} rondas · ${courtsPerRound} cancha${courtsPerRound === 1 ? "" : "s"}`,
+    summary: `${matches.length} partidos · ${rounds.length} rondas · ${actualCourtsPerRound} cancha${actualCourtsPerRound === 1 ? "" : "s"}`,
     matchesPerPairRange: matchCounts.length ? `${Math.min(...matchCounts)}-${Math.max(...matchCounts)} por pareja` : "Sin parejas",
     repeatSummary: `${repeatedMatchups} repetido${repeatedMatchups === 1 ? "" : "s"}`,
+  };
+}
+
+function computeRoundStats(rounds) {
+  const stats = new Map();
+  const matchupCounts = new Map();
+  rounds.forEach((round) => {
+    round.matches.forEach((match) => {
+      const one = match.pair_one;
+      const two = match.pair_two;
+      if (!stats.has(one.id)) stats.set(one.id, { ...one, matches: 0, rests: 0, rivalsSet: new Set() });
+      if (!stats.has(two.id)) stats.set(two.id, { ...two, matches: 0, rests: 0, rivalsSet: new Set() });
+      stats.get(one.id).matches += 1;
+      stats.get(two.id).matches += 1;
+      stats.get(one.id).rivalsSet.add(two.id);
+      stats.get(two.id).rivalsSet.add(one.id);
+      const key = americanoPairMatchKey(one, two);
+      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
+    });
+    round.resting.forEach((pair) => {
+      if (!stats.has(pair.id)) stats.set(pair.id, { ...pair, matches: 0, rests: 0, rivalsSet: new Set() });
+      stats.get(pair.id).rests += 1;
+    });
+  });
+  const pairStats = [...stats.values()]
+    .map((s) => ({ id: s.id, name: s.name, category: s.category, level: s.level, matches: s.matches, rests: s.rests, rivals: s.rivalsSet.size }))
+    .sort((a, b) => b.matches - a.matches || a.rests - b.rests || a.name.localeCompare(b.name));
+  const matchCounts = pairStats.map((s) => s.matches);
+  const repeatedMatchups = [...matchupCounts.values()].filter((v) => v > 1).length;
+  const maxResting = rounds.length > 0 ? Math.max(...rounds.map((r) => r.resting.length)) : 0;
+  return {
+    pairStats,
+    repeatedMatchups,
+    repeatSummary: `${repeatedMatchups} repetido${repeatedMatchups === 1 ? "" : "s"}`,
+    matchesPerPairRange: matchCounts.length ? `${Math.min(...matchCounts)}-${Math.max(...matchCounts)} por pareja` : "Sin parejas",
+    restPerRound: maxResting,
   };
 }
 
@@ -7033,8 +7456,10 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     categoryPairs.filter((pair) => getPlannerGroup(groupAssignments, pair.id) === label).length >= 2
   );
 
+  const plannerIsPrimary = (fixtureForm.mode || "manual_groups") === "manual_groups";
+
   return (
-    <details className="manual-planner" open={!matches.length}>
+    <details className="manual-planner" open={!matches.length && plannerIsPrimary}>
       <summary>Planner manual por rondas y canchas</summary>
       <div className="manual-planner-body">
         <div className="planner-command">

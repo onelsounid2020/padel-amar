@@ -1848,10 +1848,62 @@ h3 {
   color: #08223b;
 }
 
+.setup-category-title {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 136px;
+}
+
+.setup-category-title label {
+  color: #0e5d8f;
+  display: grid;
+  font-size: 0.68rem;
+  font-weight: 900;
+  gap: 4px;
+  text-transform: uppercase;
+}
+
+.setup-category-title select {
+  min-height: 32px;
+  padding: 5px 8px;
+}
+
 .setup-category-grid span,
 .setup-category-grid small {
   color: #526670;
   font-weight: 800;
+}
+
+.fixture-action-bar {
+  align-items: center;
+  background: #fffefa;
+  border: 1px solid #c7d9e4;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px;
+}
+
+.fixture-action-bar > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fixture-action-bar strong {
+  color: #08223b;
+}
+
+.fixture-action-bar span {
+  color: #526670;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.fixture-action-bar button {
+  flex: 0 0 auto;
 }
 
 .americano-panel {
@@ -1909,6 +1961,11 @@ h3 {
   display: grid;
   gap: 3px;
   padding: 9px;
+}
+
+.americano-metrics article.warning {
+  background: #fff4e8;
+  border-color: #f0a24f;
 }
 
 .americano-metrics strong {
@@ -2003,6 +2060,15 @@ h3 {
   padding: 8px;
 }
 
+.americano-match--edited {
+  border-left-color: #f0b429;
+}
+
+.americano-match--duplicate {
+  border-left-color: #e53e3e;
+  box-shadow: 0 0 0 2px rgb(229 62 62 / 0.25);
+}
+
 .americano-match span {
   color: #0e5d8f;
   font-size: 0.72rem;
@@ -2024,6 +2090,39 @@ h3 {
   gap: 2px;
   min-height: 44px;
   padding: 7px 8px;
+}
+
+.americano-pair-pill--drag {
+  cursor: grab;
+  transition: opacity 120ms, box-shadow 120ms, transform 120ms;
+  user-select: none;
+}
+
+.americano-pair-pill--drag:active {
+  cursor: grabbing;
+  opacity: 0.6;
+  transform: scale(0.97);
+}
+
+.americano-pair-pill--drop-valid {
+  box-shadow: 0 0 0 2px #13a66f;
+  opacity: 0.8;
+}
+
+.americano-pair-pill--drop-invalid {
+  box-shadow: 0 0 0 2px #e53e3e;
+  cursor: no-drop;
+  opacity: 0.65;
+}
+
+.americano-swap-error {
+  background: #fff0e7;
+  border: 1px solid #e67d47;
+  border-radius: 7px;
+  color: #7a1f10;
+  font-size: 0.85rem;
+  font-weight: 800;
+  padding: 8px 12px;
 }
 
 .americano-pair-pill strong {
