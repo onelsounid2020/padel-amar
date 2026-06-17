@@ -72,6 +72,43 @@ const defaultFixtureConfig = {
   planner_replace_unplayed: true,
 };
 
+const FIXTURE_PRESETS_KEY = "amar_fixture_presets";
+
+const BUILTIN_PRESETS = [
+  {
+    id: "americano_5",
+    name: "Americano · 5 partidos",
+    builtin: true,
+    config: { mode: "americano_inteligente", set_minutes: 22, warmup_minutes: 0, group_size: 4, guaranteed_matches: 5, balance_mode: "level" },
+  },
+  {
+    id: "americano_7",
+    name: "Americano · 7 partidos",
+    builtin: true,
+    config: { mode: "americano_inteligente", set_minutes: 20, warmup_minutes: 0, group_size: 4, guaranteed_matches: 7, balance_mode: "level" },
+  },
+  {
+    id: "grupos_finales",
+    name: "Grupos de 4 + Finales",
+    builtin: true,
+    config: { mode: "groups_finals", set_minutes: 22, warmup_minutes: 10, group_size: 4, guaranteed_matches: 3, balance_mode: "level" },
+  },
+  {
+    id: "round_robin",
+    name: "Todos contra todos",
+    builtin: true,
+    config: { mode: "round_robin", set_minutes: 20, warmup_minutes: 0, group_size: 4, guaranteed_matches: 3, balance_mode: "level" },
+  },
+];
+
+function loadFixturePresets() {
+  try { return JSON.parse(localStorage.getItem(FIXTURE_PRESETS_KEY) || "[]"); } catch { return []; }
+}
+
+function persistFixturePresets(presets) {
+  localStorage.setItem(FIXTURE_PRESETS_KEY, JSON.stringify(presets));
+}
+
 const eventStatusOptions = [
   { value: "draft", label: "Borrador" },
   { value: "published", label: "Publicado" },
@@ -2267,6 +2304,7 @@ function PlayerMatchCard({ match, pairById, myPairId, submission, score, setScor
           <span>{pairOne ? pairName(pairOne) : "Pareja 1"}</span>
           <input
             type="number"
+            inputMode="numeric"
             min="0"
             value={score.pair_one_score}
             onChange={(event) => setScore(match.id, "pair_one_score", event.target.value)}
@@ -2278,6 +2316,7 @@ function PlayerMatchCard({ match, pairById, myPairId, submission, score, setScor
           <span>{pairTwo ? pairName(pairTwo) : "Pareja 2"}</span>
           <input
             type="number"
+            inputMode="numeric"
             min="0"
             value={score.pair_two_score}
             onChange={(event) => setScore(match.id, "pair_two_score", event.target.value)}
@@ -2599,7 +2638,12 @@ function PublicResults({
                 {categoryStandings.map((standing) => (
                   <div className="ranking-row" key={standing.id}>
                     <span>{standing.position}</span>
-                    <span>{pairName(standing.pair)}</span>
+                    <span className="ranking-pair-name">
+                      <span className="pair-names">
+                        <span className="pair-p1">{standing.pair.player_one?.name || "—"}</span>
+                        <span className={`pair-p2${standing.pair.player_two ? "" : " pair-p2-solo"}`}>{standing.pair.player_two?.name || "busca partner"}</span>
+                      </span>
+                    </span>
                     <span>{standing.played}</span>
                     <span>{standing.won}</span>
                     <span>{standing.points}</span>
@@ -3229,6 +3273,10 @@ function OperationsStatus({ pairs, payments, registrations, matches }) {
 }
 
 function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matches, fixtureForm, setFixtureForm, fixtureTiming, configuredCourts }) {
+  const [userPresets, setUserPresets] = useState(() => loadFixturePresets());
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+
   const categories = matchCategoryPlans(pairs);
   const scheduledRows = scheduledMatchRows(matches, pairs).filter((row) => row.time || row.turn);
   const scheduledStartMinutes = scheduledRows.map((row) => minutesFromSlot(row.time || row.turn)).filter((minutes) => minutes !== 9999);
@@ -3252,6 +3300,42 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
 
   function update(patch) {
     setFixtureForm({ ...fixtureForm, ...patch });
+  }
+
+  function applyPreset(preset) {
+    const patch = { ...preset.config };
+    if (patch.courts) patch.court_count = parseCourtList(patch.courts).length;
+    update(patch);
+  }
+
+  function handleSavePreset() {
+    if (!presetName.trim()) return;
+    const preset = {
+      id: `custom_${Date.now()}`,
+      name: presetName.trim(),
+      builtin: false,
+      config: {
+        mode: fixtureForm.mode,
+        set_minutes: fixtureForm.set_minutes,
+        warmup_minutes: fixtureForm.warmup_minutes,
+        group_size: fixtureForm.group_size,
+        guaranteed_matches: fixtureForm.guaranteed_matches,
+        balance_mode: fixtureForm.balance_mode,
+        courts: fixtureForm.courts,
+        court_count: fixtureForm.court_count,
+      },
+    };
+    const updated = [...userPresets, preset];
+    setUserPresets(updated);
+    persistFixturePresets(updated);
+    setPresetName("");
+    setSavingPreset(false);
+  }
+
+  function handleDeletePreset(id) {
+    const updated = userPresets.filter((p) => p.id !== id);
+    setUserPresets(updated);
+    persistFixturePresets(updated);
   }
 
   return (
@@ -3282,6 +3366,35 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
           <strong>{recommendedCourts} cancha{recommendedCourts === 1 ? "" : "s"}</strong>
           <small>{courtDelta ? `Faltan ${courtDelta} según configuración actual.` : "La configuración alcanza."}</small>
         </article>
+      </div>
+
+      <div className="fixture-preset-bar">
+        <span className="preset-bar-label">Formatos guardados</span>
+        <div className="preset-list">
+          {[...BUILTIN_PRESETS, ...userPresets].map((preset) => (
+            <span key={preset.id} className={`preset-chip${preset.builtin ? "" : " preset-chip-custom"}`}>
+              <button onClick={() => applyPreset(preset)}>{preset.name}</button>
+              {!preset.builtin && (
+                <button className="preset-delete" onClick={() => handleDeletePreset(preset.id)} aria-label="Eliminar">×</button>
+              )}
+            </span>
+          ))}
+          {savingPreset ? (
+            <span className="preset-save-form">
+              <input
+                autoFocus
+                placeholder="Nombre del formato"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSavePreset(); if (e.key === "Escape") { setSavingPreset(false); setPresetName(""); } }}
+              />
+              <button onClick={handleSavePreset} disabled={!presetName.trim()}>Guardar</button>
+              <button className="preset-cancel" onClick={() => { setSavingPreset(false); setPresetName(""); }}>Cancelar</button>
+            </span>
+          ) : (
+            <button className="preset-add" onClick={() => setSavingPreset(true)}>+ Guardar configuración actual</button>
+          )}
+        </div>
       </div>
 
       <div className="tournament-setup-grid">
@@ -5350,18 +5463,26 @@ function PaymentBlock({ payments, pairs, players, eventId, onChange }) {
 }
 
 function RankingFormulaPanel({ config }) {
+  const [expanded, setExpanded] = useState(false);
   const mergedConfig = { ...defaultRankingConfig, ...(config || {}) };
   const tiebreakers = mergedConfig.tiebreakers?.length ? mergedConfig.tiebreakers : defaultRankingConfig.tiebreakers;
   const labels = Object.fromEntries(rankingTiebreakerOptions.map((option) => [option.value, option.label]));
+  const shortLabel = { points: "PTS", won: "G", difference: "DIF", points_for: "PF", played: "J" };
 
   return (
-    <article className="ranking-formula-panel">
+    <article className={`ranking-formula-panel${expanded ? " formula-expanded" : ""}`}>
       <div className="ranking-formula-main">
         <span>Fórmula de puntos</span>
         <strong>PTS = (G × {mergedConfig.win_points}) + (E × {mergedConfig.draw_points}) + (P × {mergedConfig.loss_points})</strong>
-        <small>Cada categoría se calcula y ordena por separado.</small>
+        <small className="formula-detail">Cada categoría se calcula y ordena por separado.</small>
+        <small className="formula-compact">
+          Orden: {tiebreakers.map((c) => shortLabel[c] || c).join(" › ")}
+          <button className="formula-toggle" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? "▲ ocultar" : "▼ ver leyenda"}
+          </button>
+        </small>
       </div>
-      <div className="ranking-formula-definitions">
+      <div className="ranking-formula-definitions formula-collapsible">
         <span><strong>J</strong> Jugados</span>
         <span><strong>G</strong> Ganados</span>
         <span><strong>E</strong> Empatados = J − G − P</span>
@@ -5371,7 +5492,7 @@ function RankingFormulaPanel({ config }) {
         <span><strong>DIF</strong> PF − PC</span>
         <span><strong>PTS</strong> Puntos de clasificación</span>
       </div>
-      <div className="ranking-order-formula">
+      <div className="ranking-order-formula formula-collapsible">
         <span>Orden aplicado</span>
         <ol>
           {tiebreakers.map((criterion, index) => <li key={`${criterion}-${index}`}>{labels[criterion] || criterion}</li>)}
@@ -5805,7 +5926,13 @@ function RankingBlock({ ranking, standings, matches = [], pairs = [], detailed =
                   }}
                 >
                   <span>{standing.position}</span>
-                  <span className="ranking-pair-name">{pairName(standing.pair)} <Eye size={14} /></span>
+                  <span className="ranking-pair-name">
+                    <span className="pair-names">
+                      <span className="pair-p1">{standing.pair.player_one?.name || "—"}</span>
+                      <span className={`pair-p2${standing.pair.player_two ? "" : " pair-p2-solo"}`}>{standing.pair.player_two?.name || "busca partner"}</span>
+                    </span>
+                    <Eye size={14} />
+                  </span>
                   <span>{standing.played}</span>
                   <span>{standing.won}</span>
                   {detailed && <span>{standing.played - standing.won - standing.lost}</span>}
