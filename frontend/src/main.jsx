@@ -2091,9 +2091,11 @@ function PlayerProfile({
             <article className="player-focus-card next">
               <div className="player-card-head">
                 <h2><Clock size={18} /> Próximo partido</h2>
-                <span>{nextMatch ? parseFixtureRoundLabel(nextMatch.round_name).time || parseFixtureRoundLabel(nextMatch.round_name).turn : "Sin pendientes"}</span>
+                <span>{selectedEvent?.fixture_visible && nextMatch ? parseFixtureRoundLabel(nextMatch.round_name).time || parseFixtureRoundLabel(nextMatch.round_name).turn : "—"}</span>
               </div>
-              {nextMatch ? (
+              {!selectedEvent?.fixture_visible ? (
+                <p className="empty">El fixture aún no está publicado.</p>
+              ) : nextMatch ? (
                 <MatchSummary match={nextMatch} pairById={pairById} myPairId={myPair.id} />
               ) : (
                 <p className="empty">No tienes partidos pendientes en este evento.</p>
@@ -2132,9 +2134,14 @@ function PlayerProfile({
           <section className="player-match-list">
             <div className="block-head">
               <h2><FileCheck2 size={18} /> Mis partidos</h2>
-              <span>{pendingMatches.length} pendiente{pendingMatches.length === 1 ? "" : "s"}</span>
+              <span>{selectedEvent?.fixture_visible ? `${pendingMatches.length} pendiente${pendingMatches.length === 1 ? "" : "s"}` : "no publicados"}</span>
             </div>
-            {myMatches.length ? myMatches.map((match) => (
+            {!selectedEvent?.fixture_visible ? (
+              <div className="player-empty compact">
+                <strong>Fixture no publicado</strong>
+                <span>La organización aún no ha publicado los partidos. Te avisaremos cuando estén disponibles.</span>
+              </div>
+            ) : myMatches.length ? myMatches.map((match) => (
               <PlayerMatchCard
                 key={match.id}
                 match={match}
