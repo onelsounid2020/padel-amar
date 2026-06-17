@@ -2012,6 +2012,37 @@ h3 {
   text-transform: uppercase;
 }
 
+.americano-cat-filter {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.americano-cat-filter button {
+  background: #f0f6fa;
+  border: 1.5px solid #c5dce8;
+  border-radius: 20px;
+  color: #3a6070;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 4px 14px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.americano-cat-filter button:hover {
+  background: #ddeef6;
+  border-color: #7ab9d4;
+}
+
+.americano-cat-filter button.active {
+  background: #1a6e96;
+  border-color: #1a6e96;
+  color: #fff;
+}
+
 .americano-rounds {
   display: grid;
   gap: 8px;

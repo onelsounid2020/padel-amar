@@ -3635,6 +3635,7 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
   }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts, fixtureForm.category_court_preferences]);
 
   const [editableRounds, setEditableRounds] = useState(() => preview.rounds);
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const dragRef = useRef(null);
   const swapErrorRef = useRef(null);
   const configKeyRef = useRef(null);
@@ -3823,8 +3824,35 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
         </div>
       )}
 
+      {printableCategories.length > 1 && (
+        <div className="americano-cat-filter">
+          <button
+            type="button"
+            className={categoryFilter === "all" ? "active" : ""}
+            onClick={() => setCategoryFilter("all")}
+          >
+            Todas
+          </button>
+          {printableCategories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              className={categoryFilter === cat ? "active" : ""}
+              onClick={() => setCategoryFilter(cat)}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="americano-rounds">
-        {editableRounds.length ? editableRounds.map((round, roundIdx) => (
+        {editableRounds.length ? editableRounds.map((round, roundIdx) => {
+          const visibleMatches = categoryFilter === "all"
+            ? round.matches
+            : round.matches.filter((m) => m.pair_one.category === categoryFilter);
+          if (visibleMatches.length === 0) return null;
+          return (
           <article className="americano-round" key={`americano-r${round.round}`}>
             <header>
               <strong>R{round.round}</strong>
@@ -3832,11 +3860,12 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
               {round.resting.length > 0 && <small>Descansan: {round.resting.map((pair) => pair.shortName).join(", ")}</small>}
             </header>
             <div className="americano-match-grid">
-              {round.matches.map((match, matchIdx) => {
+              {visibleMatches.map((match) => {
+                const matchIdx_real = round.matches.indexOf(match);
                 const matchKey = americanoPairMatchKey(match.pair_one, match.pair_two);
                 const isDuplicate = duplicateMatchKeys.has(matchKey);
                 const getDragOverValid = (side) => {
-                  if (!dragOver || dragOver.roundIdx !== roundIdx || dragOver.matchIdx !== matchIdx || dragOver.side !== side) return null;
+                  if (!dragOver || dragOver.roundIdx !== roundIdx || dragOver.matchIdx !== matchIdx_real || dragOver.side !== side) return null;
                   return dragOver.valid;
                 };
                 return (
@@ -3848,7 +3877,7 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
                     <DraggablePairPill
                       pair={match.pair_one}
                       roundIdx={roundIdx}
-                      matchIdx={matchIdx}
+                      matchIdx={matchIdx_real}
                       side="pair_one"
                       dragOverValid={getDragOverValid("pair_one")}
                       onDragStart={handleDragStart}
@@ -3861,7 +3890,7 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
                     <DraggablePairPill
                       pair={match.pair_two}
                       roundIdx={roundIdx}
-                      matchIdx={matchIdx}
+                      matchIdx={matchIdx_real}
                       side="pair_two"
                       dragOverValid={getDragOverValid("pair_two")}
                       onDragStart={handleDragStart}
@@ -3875,7 +3904,8 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
               })}
             </div>
           </article>
-        )) : (
+          );
+        }) : (
           <p className="empty">Faltan al menos 2 parejas completas para generar un Americano.</p>
         )}
       </div>
