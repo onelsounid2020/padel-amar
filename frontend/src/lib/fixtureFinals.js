@@ -191,6 +191,138 @@ function sortGroupStandings(items) {
   ));
 }
 
+export function computeThreeGroupSemiFinalPlans({ pairs, matches, fixtureConfig = {} }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const categories = categoryPairGroups(pairs);
+
+  return Object.entries(categories)
+    .filter(([, categoryPairs]) => categoryPairs.length === 12)
+    .map(([category]) => {
+      const categoryRows = matches
+        .map((match) => {
+          const schedule = parseFixtureRound(match.round_name);
+          return {
+            match,
+            schedule,
+            pairOne: pairById.get(match.pair_one_id),
+            pairTwo: pairById.get(match.pair_two_id),
+          };
+        })
+        .filter((row) => fixtureCategoryFromPairs(row.pairOne, row.pairTwo, row.schedule.category) === category);
+      const groupRows = categoryRows.filter((row) => /^Grupo\s+/i.test(row.schedule.group || ""));
+      const groupedRows = groupRows.reduce((groups, row) => {
+        groups[row.schedule.group] = [...(groups[row.schedule.group] || []), row];
+        return groups;
+      }, {});
+      const groupNames = Object.keys(groupedRows).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      if (groupNames.length !== 3) return null;
+
+      const groupPlans = groupNames.map((groupName) => {
+        const rows = groupedRows[groupName];
+        const standingsMap = new Map();
+        rows.forEach((row) => {
+          [row.pairOne, row.pairTwo].filter(Boolean).forEach((pair) => {
+            if (!standingsMap.has(pair.id)) standingsMap.set(pair.id, emptyGroupStanding(pair));
+          });
+        });
+        rows.forEach((row) => {
+          if (!hasResult(row.match)) return;
+          const one = standingsMap.get(row.match.pair_one_id);
+          const two = standingsMap.get(row.match.pair_two_id);
+          if (!one || !two) return;
+          const oneScore = Number(row.match.pair_one_score);
+          const twoScore = Number(row.match.pair_two_score);
+          one.played += 1;
+          two.played += 1;
+          one.pointsFor += oneScore;
+          one.pointsAgainst += twoScore;
+          two.pointsFor += twoScore;
+          two.pointsAgainst += oneScore;
+          if (oneScore > twoScore) {
+            one.won += 1;
+            one.points += 3;
+          } else if (twoScore > oneScore) {
+            two.won += 1;
+            two.points += 3;
+          } else {
+            one.points += 1;
+            two.points += 1;
+          }
+        });
+        return {
+          groupName,
+          rows,
+          standings: sortGroupStandings([...standingsMap.values()]),
+          totalMatches: 6,
+          finishedMatches: rows.filter((row) => hasResult(row.match)).length,
+        };
+      });
+      const groupsReady = groupPlans.every((group) => group.rows.length === 6 && group.finishedMatches === 6 && group.standings.length === 4);
+      const secondPlaces = sortGroupStandings(groupPlans.map((group) => group.standings[1]).filter(Boolean));
+      const bestSecond = secondPlaces[0];
+      const latestEnd = Math.max(...groupRows.map((row) => slotEndMinutes(row.schedule.time)).filter(Boolean), minutesFromSlot(fixtureConfig.start_time || "17:00"));
+      const slotDurations = groupRows.map((row) => {
+        const start = minutesFromSlot(row.schedule.time);
+        const end = slotEndMinutes(row.schedule.time);
+        return end > start ? end - start : 0;
+      }).filter(Boolean);
+      const setMinutes = slotDurations.length ? Math.max(...slotDurations) : Number(fixtureConfig.set_minutes || 20);
+      const semiTime = playoffSlotLabel(latestEnd, setMinutes);
+      const finalTime = playoffSlotLabel(latestEnd, setMinutes, 1);
+      const courts = [...new Set(groupRows.map((row) => row.match.court).filter(Boolean))]
+        .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+      const existingSemiOne = categoryRows.find((row) => /semifinal 1/i.test(row.match.round_name || ""))?.match;
+      const existingSemiTwo = categoryRows.find((row) => /semifinal 2/i.test(row.match.round_name || ""))?.match;
+      const existingFinal = categoryRows.find((row) => /\bfinal\b/i.test(row.match.round_name || "") && !/semifinal/i.test(row.match.round_name || ""))?.match;
+      const existingThirdPlace = categoryRows.find((row) => /3er lugar/i.test(row.match.round_name || ""))?.match;
+      const firstA = groupPlans[0].standings[0]?.pair;
+      const firstB = groupPlans[1].standings[0]?.pair;
+      const firstC = groupPlans[2].standings[0]?.pair;
+      const semis = groupsReady ? [
+        !existingSemiOne && firstA && firstC ? {
+          pair_one_id: firstA.id,
+          pair_two_id: firstC.id,
+          round_name: `${category} - Fase final - Semifinal 1 - ${semiTime}`,
+          court: courts[0] || "1",
+        } : null,
+        !existingSemiTwo && firstB && bestSecond?.pair ? {
+          pair_one_id: firstB.id,
+          pair_two_id: bestSecond.pair.id,
+          round_name: `${category} - Fase final - Semifinal 2 - ${semiTime}`,
+          court: courts[1] || courts[0] || "1",
+        } : null,
+      ].filter(Boolean) : [];
+      const semiOneResult = resolveMatchResult(existingSemiOne);
+      const semiTwoResult = resolveMatchResult(existingSemiTwo);
+      const finalists = [semiOneResult.winnerId, semiTwoResult.winnerId].map((id) => pairById.get(id)).filter(Boolean);
+      const thirdPlacePairs = [semiOneResult.loserId, semiTwoResult.loserId].map((id) => pairById.get(id)).filter(Boolean);
+      const finals = finalists.length === 2 && thirdPlacePairs.length === 2 ? [
+        !existingFinal ? { pair_one_id: finalists[0].id, pair_two_id: finalists[1].id, round_name: `${category} - Fase final - Final - ${finalTime}`, court: courts[0] || "1" } : null,
+        !existingThirdPlace ? { pair_one_id: thirdPlacePairs[0].id, pair_two_id: thirdPlacePairs[1].id, round_name: `${category} - Fase final - 3er lugar - ${finalTime}`, court: courts[1] || courts[0] || "1" } : null,
+      ].filter(Boolean) : [];
+
+      return {
+        type: "three_group_semis",
+        category,
+        groupPlans,
+        bestSecond,
+        finishedGroupMatches: groupPlans.reduce((sum, group) => sum + group.finishedMatches, 0),
+        totalGroupMatches: 18,
+        groupReady: groupsReady,
+        allGroupResults: groupsReady,
+        semis,
+        finals,
+        existingSemiOne,
+        existingSemiTwo,
+        existingFinal,
+        existingThirdPlace,
+        semiTime,
+        finalTime,
+      };
+    })
+    .filter(Boolean);
+}
+
 export function computeGroupPlacementFinalPlans({ pairs, matches, fixtureConfig = {} }) {
   const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
   const setMinutes = Number(fixtureConfig.set_minutes || 20);
@@ -300,6 +432,7 @@ export function computeFinalPlans(options) {
   return [
     ...computeFourPairFinalPlans(options).map((plan) => ({ ...plan, type: "semis" })),
     ...computeGroupPlacementFinalPlans(options),
+    ...computeThreeGroupSemiFinalPlans(options),
   ];
 }
 
