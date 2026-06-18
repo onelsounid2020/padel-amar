@@ -3642,6 +3642,7 @@ function TournamentSetupPanel({
       <FixtureBuilderPanel
         eventId={eventId}
         pairs={pairs}
+        matches={matches}
         fixtureForm={fixtureForm}
         fixtureTiming={fixtureTiming}
         configuredCourts={configuredCourts}
@@ -3688,8 +3689,9 @@ function validateSwap(rounds, srcRoundIdx, srcMatchIdx, srcSide, dstRoundIdx, ds
   return { valid: true };
 }
 
-function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, configuredCourts, loading, onChange }) {
+function FixtureBuilderPanel({ eventId, pairs, matches, fixtureForm, fixtureTiming, configuredCourts, loading, onChange }) {
   const fixedPairs = useMemo(() => americanoFixedPairs(pairs), [pairs]);
+  const pairById = useMemo(() => new Map(pairs.map((p) => [p.id, p])), [pairs]);
   const courts = useMemo(() => parseCourtList(fixtureForm.courts).slice(0, Math.max(1, Number(configuredCourts || fixtureForm.court_count || 1))), [fixtureForm.courts, fixtureForm.court_count, configuredCourts]);
   const formatLabel = fixtureFormatLabel(fixtureForm.mode);
   const preview = useMemo(() => generateFixedPairAmericanoFixture({
@@ -3701,11 +3703,14 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
     categoryCourtPreferences: fixtureForm.category_court_preferences || {},
   }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts, fixtureForm.category_court_preferences]);
 
-  const [editableRounds, setEditableRounds] = useState(() => preview.rounds);
+  const savedRounds = useMemo(() => matchesToEditableRounds(matches, pairById), [matches, pairById]);
+
+  const [editableRounds, setEditableRounds] = useState(() => savedRounds || preview.rounds);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const dragRef = useRef(null);
   const swapErrorRef = useRef(null);
   const configKeyRef = useRef(null);
+  const matchesKeyRef = useRef(null);
   const [dragOver, setDragOver] = useState(null);
   const [swapError, setSwapError] = useState(null);
 
@@ -3718,12 +3723,22 @@ function FixtureBuilderPanel({ eventId, pairs, fixtureForm, fixtureTiming, confi
     JSON.stringify(fixtureForm.category_court_preferences || {}),
   ].join("|");
 
+  const matchesKey = matches.map((m) => m.id).join(",");
+
   useEffect(() => {
-    if (configKeyRef.current !== configKey) {
-      configKeyRef.current = configKey;
+    const prevConfigKey = configKeyRef.current;
+    const prevMatchesKey = matchesKeyRef.current;
+    configKeyRef.current = configKey;
+    matchesKeyRef.current = matchesKey;
+
+    if (prevConfigKey !== null && prevConfigKey !== configKey) {
+      // Config changed intentionally — show fresh generated preview
       setEditableRounds(preview.rounds);
+    } else if (prevMatchesKey !== null && prevMatchesKey !== matchesKey && savedRounds) {
+      // DB matches updated from another client — sync to current saved fixture
+      setEditableRounds(savedRounds);
     }
-  }, [configKey, preview]);
+  }, [configKey, matchesKey, preview, savedRounds]);
 
   const hasManualEdits = useMemo(() => editableRounds.some((r) => r.matches.some((m) => m.locked)), [editableRounds]);
   const allMatches = useMemo(() => editableRounds.flatMap((r) => r.matches), [editableRounds]);
@@ -6919,6 +6934,47 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     matchesPerPairRange: matchCounts.length ? `${Math.min(...matchCounts)}-${Math.max(...matchCounts)} por pareja` : "Sin parejas",
     repeatSummary: `${repeatedMatchups} repetido${repeatedMatchups === 1 ? "" : "s"}`,
   };
+}
+
+function matchesToEditableRounds(matches, pairById) {
+  if (!matches.length) return null;
+  const roundMap = new Map();
+  for (const match of matches) {
+    const key = match.round_name || "Grupo";
+    if (!roundMap.has(key)) roundMap.set(key, []);
+    roundMap.get(key).push(match);
+  }
+  const entries = [...roundMap.entries()].sort(([a], [b]) => {
+    const numA = Number(a.match(/Ronda\s+(\d+)/i)?.[1] ?? 999);
+    const numB = Number(b.match(/Ronda\s+(\d+)/i)?.[1] ?? 999);
+    const timeA = (a.match(/(\d{1,2}:\d{2})-/) || [])[1] || "";
+    const timeB = (b.match(/(\d{1,2}:\d{2})-/) || [])[1] || "";
+    return numA - numB || timeA.localeCompare(timeB) || a.localeCompare(b);
+  });
+  return entries.map(([roundName, roundMatches], idx) => {
+    const parsed = parseFixtureRoundLabel(roundName);
+    const [startTime = "", endTime = ""] = (parsed.time || "").split("-");
+    const sorted = [...roundMatches].sort((a, b) =>
+      String(a.court || "").localeCompare(String(b.court || ""), undefined, { numeric: true }),
+    );
+    return {
+      roundLabel: `R${idx + 1}`,
+      roundName,
+      startTime,
+      endTime,
+      matches: sorted.map((match) => {
+        const pairOne = pairById.get(match.pair_one_id);
+        const pairTwo = pairById.get(match.pair_two_id);
+        return {
+          pair_one: pairOne || { id: match.pair_one_id, player_one: {}, player_two: {} },
+          pair_two: pairTwo || { id: match.pair_two_id, player_one: {}, player_two: {} },
+          court: String(match.court || ""),
+          category: pairOne?.category || "",
+          locked: false,
+        };
+      }),
+    };
+  });
 }
 
 function computeRoundStats(rounds) {
