@@ -3731,12 +3731,14 @@ function FixtureBuilderPanel({ eventId, pairs, matches, fixtureForm, fixtureTimi
     configKeyRef.current = configKey;
     matchesKeyRef.current = matchesKey;
 
-    if (prevConfigKey !== null && prevConfigKey !== configKey) {
-      // Config changed intentionally — show fresh generated preview
-      setEditableRounds(preview.rounds);
-    } else if (prevMatchesKey !== null && prevMatchesKey !== matchesKey && savedRounds) {
-      // DB matches updated from another client — sync to current saved fixture
+    if (savedRounds) {
+      // Stored matches are the source of truth for reprinting an existing fixture.
       setEditableRounds(savedRounds);
+    } else if (prevConfigKey !== null && prevConfigKey !== configKey) {
+      // Config changed intentionally and there is no saved fixture yet.
+      setEditableRounds(preview.rounds);
+    } else if (prevMatchesKey !== null && prevMatchesKey !== matchesKey) {
+      setEditableRounds(preview.rounds);
     }
   }, [configKey, matchesKey, preview, savedRounds]);
 
@@ -6744,6 +6746,20 @@ function americanoPairMatchKey(left, right) {
   return [left.id, right.id].sort().join("|");
 }
 
+function americanoPairFromSavedPair(pair, fallbackId, fallbackCategory = "") {
+  const pairId = pair?.id ?? fallbackId;
+  const name = pair ? pairName(pair) : `Pareja ${fallbackId || ""}`.trim();
+  return {
+    id: String(pairId || ""),
+    pairId,
+    name,
+    shortName: name,
+    category: pair?.category || fallbackCategory || "Sin categoria",
+    level: Number(pair?.skill_level || 5),
+    color: pair?.color || "#e5f6ff",
+  };
+}
+
 function courtNumber(court) {
   const match = String(court || "").match(/\d+/);
   return match ? Number(match[0]) : null;
@@ -6954,22 +6970,27 @@ function matchesToEditableRounds(matches, pairById) {
   return entries.map(([roundName, roundMatches], idx) => {
     const parsed = parseFixtureRoundLabel(roundName);
     const [startTime = "", endTime = ""] = (parsed.time || "").split("-");
+    const roundNumber = Number(roundName.match(/Ronda\s+(\d+)/i)?.[1] || idx + 1);
     const sorted = [...roundMatches].sort((a, b) =>
       String(a.court || "").localeCompare(String(b.court || ""), undefined, { numeric: true }),
     );
     return {
-      roundLabel: `R${idx + 1}`,
+      round: roundNumber,
       roundName,
-      startTime,
-      endTime,
+      start_time: startTime,
+      end_time: endTime,
+      resting: [],
       matches: sorted.map((match) => {
         const pairOne = pairById.get(match.pair_one_id);
         const pairTwo = pairById.get(match.pair_two_id);
+        const fallbackCategory = fixtureCategoryFromPairs(pairOne, pairTwo, parsed.category || "");
         return {
-          pair_one: pairOne || { id: match.pair_one_id, player_one: {}, player_two: {} },
-          pair_two: pairTwo || { id: match.pair_two_id, player_one: {}, player_two: {} },
+          pair_one: americanoPairFromSavedPair(pairOne, match.pair_one_id, fallbackCategory),
+          pair_two: americanoPairFromSavedPair(pairTwo, match.pair_two_id, fallbackCategory),
           court: String(match.court || ""),
-          category: pairOne?.category || "",
+          start_time: startTime,
+          end_time: endTime,
+          category: fallbackCategory,
           locked: false,
         };
       }),
@@ -6993,7 +7014,7 @@ function computeRoundStats(rounds) {
       const key = americanoPairMatchKey(one, two);
       matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
     });
-    round.resting.forEach((pair) => {
+    (round.resting || []).forEach((pair) => {
       if (!stats.has(pair.id)) stats.set(pair.id, { ...pair, matches: 0, rests: 0, rivalsSet: new Set() });
       stats.get(pair.id).rests += 1;
     });
@@ -7003,7 +7024,7 @@ function computeRoundStats(rounds) {
     .sort((a, b) => b.matches - a.matches || a.rests - b.rests || a.name.localeCompare(b.name));
   const matchCounts = pairStats.map((s) => s.matches);
   const repeatedMatchups = [...matchupCounts.values()].filter((v) => v > 1).length;
-  const maxResting = rounds.length > 0 ? Math.max(...rounds.map((r) => r.resting.length)) : 0;
+  const maxResting = rounds.length > 0 ? Math.max(...rounds.map((r) => (r.resting || []).length)) : 0;
   return {
     pairStats,
     repeatedMatchups,
