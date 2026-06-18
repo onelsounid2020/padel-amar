@@ -3691,7 +3691,7 @@ function validateSwap(rounds, srcRoundIdx, srcMatchIdx, srcSide, dstRoundIdx, ds
 
 function FixtureBuilderPanel({ eventId, pairs, matches, fixtureForm, fixtureTiming, configuredCourts, loading, onChange }) {
   const fixedPairs = useMemo(() => americanoFixedPairs(pairs), [pairs]);
-  const pairById = useMemo(() => new Map(pairs.map((p) => [p.id, p])), [pairs]);
+  const pairById = useMemo(() => new Map(fixedPairs.map((p) => [p.pairId, p])), [fixedPairs]);
   const courts = useMemo(() => parseCourtList(fixtureForm.courts).slice(0, Math.max(1, Number(configuredCourts || fixtureForm.court_count || 1))), [fixtureForm.courts, fixtureForm.court_count, configuredCourts]);
   const formatLabel = fixtureFormatLabel(fixtureForm.mode);
   const preview = useMemo(() => generateFixedPairAmericanoFixture({
@@ -6706,21 +6706,22 @@ function plannerSlotGroup(slot, assignments) {
   return oneGroup && oneGroup === twoGroup ? oneGroup : "";
 }
 
+const AMERICANO_PAIR_COLORS = [
+  "#e5f6ff",
+  "#e8f8df",
+  "#fff1c7",
+  "#ffe1d6",
+  "#f0e4ff",
+  "#dcf8f3",
+  "#ffe3ef",
+  "#e7ecff",
+  "#f4efd8",
+  "#dff4ea",
+  "#fde7c8",
+  "#e1f1f5",
+];
+
 function americanoFixedPairs(pairs = []) {
-  const colors = [
-    "#e5f6ff",
-    "#e8f8df",
-    "#fff1c7",
-    "#ffe1d6",
-    "#f0e4ff",
-    "#dcf8f3",
-    "#ffe3ef",
-    "#e7ecff",
-    "#f4efd8",
-    "#dff4ea",
-    "#fde7c8",
-    "#e1f1f5",
-  ];
   return pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id)
     .map((pair) => ({
@@ -6738,7 +6739,7 @@ function americanoFixedPairs(pairs = []) {
     ))
     .map((pair, index) => ({
       ...pair,
-      color: colors[index % colors.length],
+      color: AMERICANO_PAIR_COLORS[index % AMERICANO_PAIR_COLORS.length],
     }));
 }
 
@@ -6756,7 +6757,7 @@ function americanoPairFromSavedPair(pair, fallbackId, fallbackCategory = "") {
     shortName: name,
     category: pair?.category || fallbackCategory || "Sin categoria",
     level: Number(pair?.skill_level || 5),
-    color: pair?.color || "#e5f6ff",
+    color: pair?.color || AMERICANO_PAIR_COLORS[0],
   };
 }
 
