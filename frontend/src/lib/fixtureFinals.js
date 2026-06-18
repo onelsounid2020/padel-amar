@@ -435,3 +435,129 @@ export function computeFinalPlans(options) {
     ...computeThreeGroupSemiFinalPlans(options),
   ];
 }
+
+function placementLabel(position) {
+  if (position === 1) return "Final oro y plata";
+  if (position === 3) return "Partido por bronce";
+  return `Definición puestos ${position} y ${position + 1}`;
+}
+
+function isRankingPlacementMatch(match) {
+  return /Fase final.*Ronda 5.*(Final oro y plata|Partido por bronce|Definición puestos)/i.test(match.round_name || "");
+}
+
+export function computeRankingPlacementFixture({ pairs, matches, standings, fixtureConfig = {} }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const setMinutes = Number(fixtureConfig.set_minutes || 20);
+  const fallbackStart = fixtureConfig.start_time || "17:00";
+  const standingsByCategory = standings.reduce((groups, standing) => {
+    const pair = standing.pair || pairById.get(standing.pair_id);
+    const category = pair?.category || "Sin categoría";
+    groups[category] = [...(groups[category] || []), { ...standing, pair }];
+    return groups;
+  }, {});
+
+  return Object.entries(standingsByCategory).map(([category, categoryStandings]) => {
+    const orderedStandings = [...categoryStandings].sort((left, right) => left.position - right.position);
+    const categoryMatches = matches.filter((match) => {
+      const pair = pairById.get(match.pair_one_id) || pairById.get(match.pair_two_id);
+      return pair?.category === category || parseFixtureRound(match.round_name).category === category;
+    });
+    const existingMatches = categoryMatches.filter((match) => /Fase final.*Ronda 5/i.test(match.round_name || ""));
+    const baseMatches = categoryMatches.filter((match) => !/Fase final/i.test(match.round_name || ""));
+    const pendingBaseMatches = baseMatches.filter((match) => !hasResult(match));
+    const courts = [...new Set(baseMatches.map((match) => match.court).filter(Boolean))]
+      .sort((left, right) => String(left).localeCompare(String(right), undefined, { numeric: true }));
+    const endTimes = baseMatches
+      .map((match) => {
+        const schedule = parseFixtureRound(match.round_name);
+        return slotEndMinutes(schedule.time || schedule.turn);
+      })
+      .filter(Boolean);
+    const latestEnd = endTimes.length ? Math.max(...endTimes) : minutesFromSlot(fallbackStart);
+    const slot = playoffSlotLabel(latestEnd, setMinutes, 0);
+    const requiredCourts = Math.ceil(orderedStandings.length / 2);
+    const hasEvenPairs = orderedStandings.length >= 2 && orderedStandings.length % 2 === 0;
+    const ready = Boolean(
+      baseMatches.length
+      && !pendingBaseMatches.length
+      && hasEvenPairs
+      && courts.length >= requiredCourts
+      && existingMatches.length === 0
+    );
+    const proposedMatches = ready ? orderedStandings.reduce((items, standing, index) => {
+      if (index % 2 !== 0) return items;
+      const opponent = orderedStandings[index + 1];
+      if (!standing.pair || !opponent?.pair) return items;
+      const position = index + 1;
+      return [...items, {
+        pair_one_id: standing.pair.id,
+        pair_two_id: opponent.pair.id,
+        round_name: `${category} - Fase final - Ronda 5 - ${placementLabel(position)} - ${slot}`,
+        court: courts[index / 2],
+      }];
+    }, []) : [];
+
+    let reason = "";
+    if (existingMatches.length) reason = "La ronda final ya fue generada.";
+    else if (!baseMatches.length) reason = "No hay partidos de fase inicial para esta categoría.";
+    else if (pendingBaseMatches.length) reason = `Faltan ${pendingBaseMatches.length} resultado${pendingBaseMatches.length === 1 ? "" : "s"} de la fase inicial.`;
+    else if (!hasEvenPairs) reason = "La categoría necesita una cantidad par de parejas para definir todas las posiciones.";
+    else if (courts.length < requiredCourts) reason = `Se necesitan ${requiredCourts} canchas y solo se detectaron ${courts.length}.`;
+
+    return {
+      category,
+      standings: orderedStandings,
+      ready,
+      reason,
+      slot,
+      courts,
+      requiredCourts,
+      pendingBaseMatches: pendingBaseMatches.length,
+      existingMatches,
+      proposedMatches,
+    };
+  });
+}
+
+function placementPositions(roundName) {
+  if (/Final oro y plata/i.test(roundName || "")) return [1, 2];
+  if (/Partido por bronce/i.test(roundName || "")) return [3, 4];
+  const match = (roundName || "").match(/Definición puestos\s+(\d+)\s+y\s+(\d+)/i);
+  return match ? [Number(match[1]), Number(match[2])] : null;
+}
+
+export function computeFinalRanking({ pairs, matches }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const finalMatches = matches.filter(isRankingPlacementMatch);
+  const byCategory = finalMatches.reduce((groups, match) => {
+    const pair = pairById.get(match.pair_one_id) || pairById.get(match.pair_two_id);
+    const category = pair?.category || parseFixtureRound(match.round_name).category;
+    groups[category] = [...(groups[category] || []), match];
+    return groups;
+  }, {});
+
+  return Object.entries(byCategory).map(([category, categoryMatches]) => {
+    const placements = [];
+    let unresolved = false;
+    categoryMatches.forEach((match) => {
+      const positions = placementPositions(match.round_name);
+      const result = resolveMatchResult(match);
+      if (!positions || !result.winnerId || !result.loserId) {
+        unresolved = true;
+        return;
+      }
+      placements.push(
+        { position: positions[0], pair: pairById.get(result.winnerId), match },
+        { position: positions[1], pair: pairById.get(result.loserId), match },
+      );
+    });
+    return {
+      category,
+      ready: categoryMatches.length > 0 && !unresolved && placements.length === categoryMatches.length * 2,
+      completedMatches: categoryMatches.filter(hasResult).length,
+      totalMatches: categoryMatches.length,
+      placements: placements.filter((item) => item.pair).sort((left, right) => left.position - right.position),
+    };
+  });
+}

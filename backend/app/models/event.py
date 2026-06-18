@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,6 +16,12 @@ class EventStatus(str, enum.Enum):
     finished = "finished"
 
 
+class EventType(str, enum.Enum):
+    hombres = "hombres"
+    mujeres = "mujeres"
+    mixto = "mixto"
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -28,12 +34,14 @@ class Event(Base):
     schedule: Mapped[str] = mapped_column(String(120), nullable=False)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     tournament_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType), default=EventType.hombres, nullable=False)
     category_configs: Mapped[list[dict]] = mapped_column(JSON, default=list)
     ranking_config: Mapped[dict] = mapped_column(JSON, default=dict)
     fixture_config: Mapped[dict] = mapped_column(JSON, default=dict)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[EventStatus] = mapped_column(Enum(EventStatus), default=EventStatus.registration_open, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True)
+    fixture_visible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     pairs = relationship("EventPair", back_populates="event", cascade="all, delete-orphan")

@@ -1,5 +1,5 @@
 const API_URL = import.meta.env.VITE_API_URL || "/api";
-let authToken = localStorage.getItem("amar_auth_token") || "";
+let authToken = localStorage.getItem("amar_auth_token") || sessionStorage.getItem("amar_auth_token") || "";
 
 export class ApiError extends Error {
   constructor(message, status, detail) {
@@ -10,10 +10,14 @@ export class ApiError extends Error {
   }
 }
 
-export function setAuthToken(token) {
+export function setAuthToken(token, options = {}) {
+  const { persistent = true } = options;
   authToken = token || "";
-  if (authToken) localStorage.setItem("amar_auth_token", authToken);
-  else localStorage.removeItem("amar_auth_token");
+  localStorage.removeItem("amar_auth_token");
+  sessionStorage.removeItem("amar_auth_token");
+  if (!authToken) return;
+  if (persistent) localStorage.setItem("amar_auth_token", authToken);
+  else sessionStorage.setItem("amar_auth_token", authToken);
 }
 
 async function request(path, options = {}) {

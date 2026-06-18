@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, RotateCcw, Trophy } from "lucide-react";
+import { Check, Medal, RefreshCw, RotateCcw, Save, Trophy } from "lucide-react";
 
 import { api } from "../api/client";
-import { computeFinalPlans } from "../lib/fixtureFinals";
+import { computeFinalPlans, computeFinalRanking, computeRankingPlacementFixture } from "../lib/fixtureFinals";
 import { pairName } from "../lib/pairs";
 
 function parseFixtureRound(roundName) {
@@ -64,6 +64,13 @@ function normalizeScore(value) {
   return value === null || value === undefined ? "" : String(value);
 }
 
+function shortenPairName(fullName) {
+  return String(fullName || "")
+    .split(" / ")
+    .map((part) => part.trim().split(/\s+/).slice(0, 2).join(" "))
+    .join(" / ");
+}
+
 const padelScorePresets = [
   [6, 0],
   [6, 1],
@@ -74,7 +81,16 @@ const padelScorePresets = [
   [7, 6],
 ];
 
-function scoreState(current) {
+const tiebreakScorePresets = [
+  [7, 0],
+  [7, 2],
+  [7, 4],
+  [7, 5],
+  [8, 6],
+  [9, 7],
+];
+
+function scoreState(current, isTiebreak = false) {
   const one = current?.pair_one_score;
   const two = current?.pair_two_score;
   if (one === "" || two === "" || one === undefined || two === undefined) {
@@ -84,24 +100,33 @@ function scoreState(current) {
   const right = Number(two);
   if (Number.isNaN(left) || Number.isNaN(right)) return { tone: "warning", label: "Revisa números" };
   if (left === right) return { tone: "warning", label: "Empate" };
+  if (isTiebreak) {
+    const winner = Math.max(left, right);
+    const loser = Math.min(left, right);
+    if (winner < 7 || winner - loser < 2) return { tone: "warning", label: "Tiebreak incompleto" };
+    return { tone: "ok", label: left > right ? "Gana pareja 1" : "Gana pareja 2" };
+  }
   if (Math.max(left, right) > 9) return { tone: "warning", label: "Marcador alto" };
   if (Math.max(left, right) < 6) return { tone: "warning", label: "Marcador corto" };
   return { tone: "ok", label: left > right ? "Gana pareja 1" : "Gana pareja 2" };
 }
 
-function finalPlanSummary(plan, pairById) {
-  if (plan.type === "placements" && plan.placementMatches?.length) {
-    return "Final, 3er, 5to y 7mo lugar listos";
-  }
-  if (plan.finals?.length) return "Final y 3er lugar listos";
-  if (!plan.semis?.length) return "Esperando resultados";
-  if (plan.type === "three_group_semis") {
-    return plan.semis
-      .map((match) => `Cancha ${match.court}: ${pairName(pairById.get(match.pair_one_id))} vs ${pairName(pairById.get(match.pair_two_id))}`)
-      .join(" · ");
-  }
-  const rows = plan.standingsRows || [];
-  return `${rows[0]?.pair ? pairName(rows[0].pair) : "1"} vs ${rows[3]?.pair ? pairName(rows[3].pair) : "4"} · ${rows[1]?.pair ? pairName(rows[1].pair) : "2"} vs ${rows[2]?.pair ? pairName(rows[2].pair) : "3"}`;
+function finalFixtureMatchLabel(roundName) {
+  if (/Final oro y plata/i.test(roundName || "")) return "Oro y plata";
+  if (/Partido por bronce/i.test(roundName || "")) return "Bronce";
+  const match = (roundName || "").match(/Definición puestos\s+(\d+)\s+y\s+(\d+)/i);
+  return match ? `Puestos ${match[1]} y ${match[2]}` : "Definición";
+}
+
+function applyFinalMatchFormat(match, format) {
+  if (format !== "tiebreak") return match;
+  const timeMatch = match.round_name.match(/\s-\s(\d{1,2}:\d{2}-\d{1,2}:\d{2})$/);
+  return {
+    ...match,
+    round_name: timeMatch
+      ? match.round_name.replace(timeMatch[0], ` - Tiebreak a 7 - ${timeMatch[1]}`)
+      : `${match.round_name} - Tiebreak a 7`,
+  };
 }
 
 export function TabletResults({
@@ -122,7 +147,8 @@ export function TabletResults({
   const [statusFilter, setStatusFilter] = useState("pending");
   const [scores, setScores] = useState({});
   const [winnerSide, setWinnerSide] = useState({});
-  const [showInsights, setShowInsights] = useState(true);
+  const [activeTabletTab, setActiveTabletTab] = useState("scores");
+  const [finalMatchFormat, setFinalMatchFormat] = useState("normal");
 
   const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
   const matchRows = useMemo(() => matches
@@ -137,6 +163,7 @@ export function TabletResults({
         courtLabel: normalizeCourt(match.court),
         done: hasResult(match),
         group: schedule.group,
+        isTiebreak: /Tiebreak a 7/i.test(match.round_name || ""),
         match,
         pairOne: one ? pairName(one) : `Pareja ${match.pair_one_id}`,
         pairTwo: two ? pairName(two) : `Pareja ${match.pair_two_id}`,
@@ -181,11 +208,19 @@ export function TabletResults({
     const fixtureConfig = selectedEvent?.fixture_config || {};
     return computeFinalPlans({ pairs, matches, standings, fixtureConfig });
   }, [pairs, matches, standings, selectedEvent?.fixture_config]);
+  const placementFinalPlans = useMemo(() => computeRankingPlacementFixture({
+    pairs,
+    matches,
+    standings,
+    fixtureConfig: selectedEvent?.fixture_config || {},
+  }), [pairs, matches, standings, selectedEvent?.fixture_config]);
+  const finalRanking = useMemo(() => computeFinalRanking({ pairs, matches }), [pairs, matches]);
 
+  const effectiveStatusFilter = statusFilter === "pending" && pendingCount === 0 ? "all" : statusFilter;
   const visibleRows = matchRows.filter((row) => (
     (categoryFilter === "all" || row.category === categoryFilter)
     && (!activeRound || row.roundKey === activeRound)
-    && (statusFilter === "all" || (statusFilter === "pending" ? !row.done : row.done))
+    && (effectiveStatusFilter === "all" || (effectiveStatusFilter === "pending" ? !row.done : row.done))
   ));
   const hasUnsavedScores = matchRows.some((row) => {
     const current = scores[row.match.id] || {};
@@ -246,6 +281,16 @@ export function TabletResults({
     return onSave(() => api.createMatchesBulk(selectedEventId, payload, false));
   }
 
+  function createPlacementFinalMatches(payload) {
+    const formattedPayload = payload.map((match) => applyFinalMatchFormat(match, finalMatchFormat));
+    return createDynamicMatches(formattedPayload);
+  }
+
+  const proposedPlacementMatches = placementFinalPlans.flatMap((plan) => plan.proposedMatches);
+  const existingPlacementMatches = placementFinalPlans.flatMap((plan) => plan.existingMatches);
+  const allPlacementReady = placementFinalPlans.length > 0 && placementFinalPlans.every((plan) => plan.ready || plan.existingMatches.length);
+  const finalRankingReadyCount = finalRanking.filter((category) => category.ready).length;
+
   return (
     <section className="tablet-page">
       <div className="tablet-top">
@@ -260,7 +305,19 @@ export function TabletResults({
         </button>
       </div>
 
-      <div className="tablet-controls">
+      <nav className="tablet-mode-tabs" aria-label="Secciones de tablet">
+        <button type="button" className={activeTabletTab === "scores" ? "active" : ""} onClick={() => setActiveTabletTab("scores")}>
+          <Check size={16} /> Marcadores <span>{pendingCount}</span>
+        </button>
+        <button type="button" className={activeTabletTab === "ranking" ? "active" : ""} onClick={() => setActiveTabletTab("ranking")}>
+          <Medal size={16} /> Ranking <span>{Object.keys(standingsByCategory).length}</span>
+        </button>
+        <button type="button" className={activeTabletTab === "finals" ? "active" : ""} onClick={() => setActiveTabletTab("finals")}>
+          <Trophy size={16} /> Finales <span>{proposedPlacementMatches.length || finalRanking.reduce((sum, item) => sum + item.totalMatches, 0)}</span>
+        </button>
+      </nav>
+
+      {activeTabletTab === "scores" && <div className="tablet-controls">
         <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
           <option value="all">Todas las categorías</option>
           {categories.map((category) => <option key={category} value={category}>{category}</option>)}
@@ -274,10 +331,7 @@ export function TabletResults({
           <option value="done">Cargados</option>
           <option value="all">Todos</option>
         </select>
-        <button type="button" className="tablet-panel-toggle" onClick={() => setShowInsights((current) => !current)}>
-          {showInsights ? "Ocultar paneles" : "Ver ranking/finales"}
-        </button>
-      </div>
+      </div>}
 
       {conflictCount > 0 && (
         <div className="fixture-collision-alert tablet-conflict-alert">
@@ -286,69 +340,21 @@ export function TabletResults({
         </div>
       )}
 
-      {showInsights && <div className="tablet-side-panels">
-        <section className="tablet-dynamic" aria-label="Fases dinámicas">
-          <div className="tablet-panel-title">
-            <Trophy size={16} />
-            <strong>Fase final</strong>
-          </div>
-          {dynamicFinalPlans.length ? dynamicFinalPlans.map((plan) => (
-            <article key={plan.category}>
-              <div>
-                <strong>{plan.category}</strong>
-                <span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span>
-              </div>
-              <p>{finalPlanSummary(plan, pairById)}</p>
-              <div className="tablet-dynamic-actions">
-                <button
-                  type="button"
-                  disabled={!((plan.type === "placements" ? plan.placementMatches?.length : plan.semis?.length)) || loading}
-                  onClick={() => createDynamicMatches(plan.type === "placements" ? plan.placementMatches : plan.semis)}
-                >
-                  Crear R4
-                </button>
-                <button type="button" disabled={!plan.finals?.length || loading} onClick={() => createDynamicMatches(plan.finals)}>
-                  Crear R5
-                </button>
-              </div>
-            </article>
-          )) : (
-            <span className="tablet-muted">Sin categorías de 4 parejas.</span>
-          )}
-        </section>
-
-        <section className="tablet-ranking" aria-label="Ranking resumido">
-          <div className="tablet-panel-title">
-            <Trophy size={16} />
-            <strong>Ranking</strong>
-          </div>
-          {Object.entries(standingsByCategory).length ? Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
-            <article key={category}>
-              <strong>{category}</strong>
-              {categoryStandings.slice(0, 4).map((standing) => (
-                <span key={standing.id}>{standing.position}. {pairName(standing.pair)} · {standing.points} pts</span>
-              ))}
-            </article>
-          )) : (
-            <span className="tablet-muted">El ranking aparece al cargar resultados.</span>
-          )}
-        </section>
-      </div>}
-
-      <div className="tablet-match-grid">
+      {activeTabletTab === "scores" && <div className="tablet-match-grid">
         {visibleRows.length ? visibleRows.map((row) => {
           const current = scores[row.match.id] || { pair_one_score: "", pair_two_score: "" };
           const canSave = selectedEventId && current.pair_one_score !== "" && current.pair_two_score !== "";
           const isDirty = normalizeScore(current.pair_one_score) !== normalizeScore(row.match.pair_one_score)
             || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
-          const state = scoreState(current);
+          const state = scoreState(current, row.isTiebreak);
+          const scorePresets = row.isTiebreak ? tiebreakScorePresets : padelScorePresets;
           const selectedWinner = winnerSide[row.match.id] || (Number(current.pair_two_score || 0) > Number(current.pair_one_score || 0) ? "two" : "one");
           return (
             <article className={`tablet-match ${row.done ? "done" : ""} ${isDirty ? "dirty" : ""}`} key={row.match.id}>
               <div className="tablet-match-head">
                 <span>{row.time || row.turn}</span>
                 <strong>{row.courtLabel}</strong>
-                <em>{row.category}{row.group ? ` · ${row.group}` : ""}</em>
+                <em>{row.category}{row.group ? ` · ${row.group}` : ""}{row.isTiebreak ? " · Tiebreak a 7" : ""}</em>
               </div>
               <div className="tablet-winner-pick" aria-label="Seleccionar dupla ganadora">
                 <button
@@ -356,20 +362,20 @@ export function TabletResults({
                   className={selectedWinner === "one" ? "active" : ""}
                   onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "one" }))}
                 >
-                  <span>Dupla 1</span>
-                  <strong>{row.pairOne}</strong>
+                  <span>1</span>
+                  <strong title={row.pairOne}>{shortenPairName(row.pairOne)}</strong>
                 </button>
                 <button
                   type="button"
                   className={selectedWinner === "two" ? "active" : ""}
                   onClick={() => setWinnerSide((currentWinner) => ({ ...currentWinner, [row.match.id]: "two" }))}
                 >
-                  <span>Dupla 2</span>
-                  <strong>{row.pairTwo}</strong>
+                  <span>2</span>
+                  <strong title={row.pairTwo}>{shortenPairName(row.pairTwo)}</strong>
                 </button>
               </div>
               <div className="tablet-presets" aria-label="Marcadores rápidos">
-                {padelScorePresets.map(([winnerScore, loserScore]) => (
+                {scorePresets.map(([winnerScore, loserScore]) => (
                   <button
                     type="button"
                     key={`${winnerScore}-${loserScore}`}
@@ -415,7 +421,143 @@ export function TabletResults({
         }) : (
           <div className="tablet-empty">No hay partidos con esos filtros.</div>
         )}
-      </div>
+      </div>}
+
+      {activeTabletTab === "ranking" && (
+        <section className="tablet-ranking-full" aria-label="Ranking completo">
+          {Object.entries(standingsByCategory).length ? Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
+            <article key={category}>
+              <header>
+                <div><strong>{category}</strong><small>Ranking oficial</small></div>
+                <span>{categoryStandings.length} parejas</span>
+              </header>
+              <div className="tablet-ranking-table">
+                <div className="tablet-ranking-row tablet-ranking-header-row">
+                  <span>#</span>
+                  <strong>Dupla</strong>
+                  <small>Detalle oficial</small>
+                  <b>PTS</b>
+                </div>
+                {categoryStandings.map((standing) => {
+                  const draw = standing.played - standing.won - standing.lost;
+                  const difference = standing.points_for - standing.points_against;
+                  const tiedByPoints = categoryStandings.filter((item) => item.points === standing.points).length > 1;
+                  return (
+                    <div className={`tablet-ranking-row position-${standing.position} ${tiedByPoints ? "tied" : ""}`} key={standing.id}>
+                      <span>{standing.position}</span>
+                      <strong>{pairName(standing.pair)}</strong>
+                      <small>
+                        <em>J {standing.played}</em>
+                        <em>G {standing.won}</em>
+                        <em>E {draw}</em>
+                        <em>P {standing.lost}</em>
+                        <em>PF {standing.points_for}</em>
+                        <em>PC {standing.points_against}</em>
+                        <em>DIF {difference > 0 ? "+" : ""}{difference}</em>
+                        {tiedByPoints && <i>desempate</i>}
+                      </small>
+                      <b>{standing.points}</b>
+                    </div>
+                  );
+                })}
+              </div>
+            </article>
+          )) : <div className="tablet-empty">El ranking aparecerá cuando existan resultados.</div>}
+        </section>
+      )}
+
+      {activeTabletTab === "finals" && (
+        <section className="tablet-finals-workspace" aria-label="Gestión de finales">
+          <div className="tablet-final-hero">
+            <div>
+              <span>Control de cierre</span>
+              <strong>Finales y medallas</strong>
+              <small>Revisa los cruces decisivos, crea la quinta ronda y confirma el ranking final desde la tablet.</small>
+            </div>
+            <div className="tablet-final-hero-metrics">
+              <span><b>{existingPlacementMatches.length || proposedPlacementMatches.length}</b> cruces</span>
+              <span><b>{placementFinalPlans.length}</b> categorías</span>
+              <span><b>{finalRankingReadyCount}</b> rankings listos</span>
+            </div>
+          </div>
+
+          <article className="tablet-final-card primary tablet-placement-card">
+            <header>
+              <div><strong>Quinta ronda por posiciones</strong><span>{proposedPlacementMatches.length ? `${proposedPlacementMatches.length} partidos listos para crear` : existingPlacementMatches.length ? "Fixture final generado" : "Sin propuesta nueva"}</span></div>
+              {proposedPlacementMatches.length > 0 && (
+                <select value={finalMatchFormat} onChange={(event) => setFinalMatchFormat(event.target.value)}>
+                  <option value="normal">Partido normal</option>
+                  <option value="tiebreak">Tiebreak a 7</option>
+                </select>
+              )}
+            </header>
+            <div className="tablet-final-plans">
+              {placementFinalPlans.map((plan) => {
+                const previewMatches = plan.existingMatches.length ? plan.existingMatches : plan.proposedMatches.map((match) => applyFinalMatchFormat(match, finalMatchFormat));
+                return (
+                  <section key={plan.category} className={plan.ready || plan.existingMatches.length ? "ready" : "blocked"}>
+                    <div><strong>{plan.category}</strong><span>{plan.existingMatches.length ? "Generada" : plan.reason || `${plan.slot} · ${plan.requiredCourts} canchas`}</span></div>
+                    {previewMatches.map((match) => {
+                      const one = pairById.get(match.pair_one_id);
+                      const two = pairById.get(match.pair_two_id);
+                      return (
+                        <article className="tablet-placement-match" key={`${match.round_name}-${match.court}`}>
+                          <b>{match.court}</b>
+                          <div>
+                            <strong>{finalFixtureMatchLabel(match.round_name)}</strong>
+                            <span>{one ? pairName(one) : match.pair_one_id} vs {two ? pairName(two) : match.pair_two_id}</span>
+                          </div>
+                          {/Tiebreak a 7/i.test(match.round_name || "") && <em>TB7</em>}
+                        </article>
+                      );
+                    })}
+                  </section>
+                );
+              })}
+            </div>
+            {proposedPlacementMatches.length > 0 ? (
+              <button type="button" disabled={!allPlacementReady || loading} onClick={() => createPlacementFinalMatches(proposedPlacementMatches)}>
+                <Save size={16} /> Crear quinta ronda
+              </button>
+            ) : (
+              <div className="tablet-final-ready-banner"><Trophy size={18} /> Ronda final lista para cargar resultados</div>
+            )}
+          </article>
+
+          <article className="tablet-final-card">
+            <header><div><strong>Semifinales y finales dinámicas</strong><span>Para formatos de 4 u 8 parejas</span></div></header>
+            {dynamicFinalPlans.length ? dynamicFinalPlans.map((plan) => (
+              <section className="tablet-dynamic-plan" key={plan.category}>
+                <div><strong>{plan.category}</strong><span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span></div>
+                <p>{plan.type === "placements" ? "Finales por posición entre grupos" : plan.semis?.length ? "Semifinales listas" : plan.finals?.length ? "Final y 3er lugar listos" : "Esperando resultados"}</p>
+                <div className="tablet-dynamic-actions">
+                  <button type="button" disabled={!((plan.type === "placements" ? plan.placementMatches?.length : plan.semis?.length)) || loading} onClick={() => createDynamicMatches(plan.type === "placements" ? plan.placementMatches : plan.semis)}>Crear R4</button>
+                  <button type="button" disabled={!plan.finals?.length || loading} onClick={() => createDynamicMatches(plan.finals)}>Crear R5</button>
+                </div>
+              </section>
+            )) : <span className="tablet-muted">No hay finales dinámicas pendientes.</span>}
+          </article>
+
+          {finalRanking.length > 0 && (
+            <article className="tablet-final-card tablet-medal-card">
+              <header><div><strong>Ranking final</strong><span>Después de cerrar la quinta ronda</span></div></header>
+              <div className="tablet-final-ranking">
+                {finalRanking.map((category) => (
+                  <section key={category.category}>
+                    <strong>{category.category}</strong>
+                    {category.ready ? category.placements.slice(0, 4).map((placement) => (
+                      <span className={`medal-position-${placement.position}`} key={placement.position}>
+                        <b>{placement.position === 1 ? "Oro" : placement.position === 2 ? "Plata" : placement.position === 3 ? "Bronce" : "4°"}</b>
+                        {pairName(placement.pair)}
+                      </span>
+                    )) : <span>{category.completedMatches}/{category.totalMatches} cerrados</span>}
+                  </section>
+                ))}
+              </div>
+            </article>
+          )}
+        </section>
+      )}
 
     </section>
   );

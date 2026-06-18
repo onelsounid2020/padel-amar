@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
@@ -11,8 +12,10 @@ import {
   Check,
   Eye,
   EyeOff,
+  LogOut,
   ListChecks,
   Medal,
+  Menu,
   RefreshCw,
   Save,
   Swords,
@@ -23,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, api, setAuthToken } from "./api/client";
-import { computeFinalPlans } from "./lib/fixtureFinals";
+import { computeFinalPlans, computeFinalRanking, computeRankingPlacementFixture } from "./lib/fixtureFinals";
 import { pairName } from "./lib/pairs";
 import { TabletResults } from "./pages/TabletResults";
 import "./styles.css";
@@ -37,6 +40,7 @@ const emptyEvent = {
   schedule: "",
   capacity: 16,
   tournament_type: "Americano",
+  event_type: "hombres",
   category_configs: [],
   ranking_config: {},
   fixture_config: {},
@@ -66,7 +70,45 @@ const defaultFixtureConfig = {
   planner_rounds: 5,
   planner_courts: "1, 2, 3",
   planner_replace_unplayed: true,
+  category_court_preferences: {},
 };
+
+const FIXTURE_PRESETS_KEY = "amar_fixture_presets";
+
+const BUILTIN_PRESETS = [
+  {
+    id: "americano_5",
+    name: "Americano · 5 partidos",
+    builtin: true,
+    config: { mode: "americano_inteligente", set_minutes: 22, warmup_minutes: 0, group_size: 4, guaranteed_matches: 5, balance_mode: "level" },
+  },
+  {
+    id: "americano_7",
+    name: "Americano · 7 partidos",
+    builtin: true,
+    config: { mode: "americano_inteligente", set_minutes: 20, warmup_minutes: 0, group_size: 4, guaranteed_matches: 7, balance_mode: "level" },
+  },
+  {
+    id: "grupos_finales",
+    name: "Grupos de 4 + Finales",
+    builtin: true,
+    config: { mode: "groups_finals", set_minutes: 22, warmup_minutes: 10, group_size: 4, guaranteed_matches: 3, balance_mode: "level" },
+  },
+  {
+    id: "round_robin",
+    name: "Todos contra todos",
+    builtin: true,
+    config: { mode: "round_robin", set_minutes: 20, warmup_minutes: 0, group_size: 4, guaranteed_matches: 3, balance_mode: "level" },
+  },
+];
+
+function loadFixturePresets() {
+  try { return JSON.parse(localStorage.getItem(FIXTURE_PRESETS_KEY) || "[]"); } catch { return []; }
+}
+
+function persistFixturePresets(presets) {
+  localStorage.setItem(FIXTURE_PRESETS_KEY, JSON.stringify(presets));
+}
 
 const eventStatusOptions = [
   { value: "draft", label: "Borrador" },
@@ -100,7 +142,7 @@ const emptyPublicRegistration = {
   phone: "",
   paid: false,
   gender: "hombre",
-  category: "1era",
+  category: "4ta",
   preferred_side: "indiferente",
   partner_name: "",
   partner_email: "",
@@ -130,22 +172,72 @@ const publicPermissions = {
 };
 
 const categoryOptions = {
-  hombre: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
-  mujer: ["5taD+", "5ta+", "4taC+", "4ta C+", "3raB+", "2daA+"],
-  mixto: ["Mixto A", "Mixto B", "Mixto C", "Mixto D", "Mixto 4ta", "Mixto 5ta", "Mixto 4ta C+/5ta+"],
+  hombres: ["1era", "2da", "3ra", "4ta", "5ta", "6ta"],
+  mujeres: ["D+", "C+", "B+", "A+"],
+  mixto: ["4ta C+", "5ta D+"],
 };
 
 const eventCategoryGroups = [
-  { key: "hombre", label: "Hombres", categories: categoryOptions.hombre },
-  { key: "mujer", label: "Mujeres", categories: categoryOptions.mujer },
+  { key: "hombres", label: "Hombres", categories: categoryOptions.hombres },
+  { key: "mujeres", label: "Mujeres", categories: categoryOptions.mujeres },
   { key: "mixto", label: "Mixto", categories: categoryOptions.mixto },
 ];
 
+const eventTypeOptions = [
+  { value: "hombres", label: "Solo hombres" },
+  { value: "mujeres", label: "Solo mujeres" },
+  { value: "mixto", label: "Mixto" },
+];
+const eventTypeLabels = Object.fromEntries(eventTypeOptions.map((option) => [option.value, option.label]));
 const allPadelCategories = eventCategoryGroups.flatMap((group) => group.categories);
 const tabletAccessStorageKey = "amar_tablet_access_token";
+const rememberedDeviceStorageKey = "amar_remembered_player_device";
+
+function readRememberedDevice() {
+  try {
+    const value = localStorage.getItem(rememberedDeviceStorageKey);
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRememberedDevice(user, fallbackEmail = "") {
+  if (!user && !fallbackEmail) return null;
+  const remembered = {
+    email: user?.email || fallbackEmail,
+    name: user?.name || fallbackEmail,
+    role: user?.role || "jugador",
+    rememberedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(rememberedDeviceStorageKey, JSON.stringify(remembered));
+  return remembered;
+}
+
+function clearRememberedDevice() {
+  localStorage.removeItem(rememberedDeviceStorageKey);
+}
 
 function categoryLabel(category) {
   return category;
+}
+
+function categoriesForEventType(eventType) {
+  return categoryOptions[eventType] || categoryOptions.hombres;
+}
+
+function defaultCategoriesForEventType(eventType) {
+  return categoriesForEventType(eventType).join(" / ");
+}
+
+function eventCategoriesForEvent(event) {
+  const configuredCategories = [
+    ...new Set([
+      ...(event?.category_configs || []).map((config) => config.category).filter(Boolean),
+      ...(event?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
+    ]),
+  ];
+  return configuredCategories.length ? configuredCategories : categoriesForEventType(event?.event_type || "hombres");
 }
 
 function isValidEmail(value) {
@@ -288,7 +380,11 @@ function App() {
   const [currentPermissions, setCurrentPermissions] = useState(publicPermissions);
   const [permissionModules, setPermissionModules] = useState(fallbackPermissionModules);
   const [rolePermissions, setRolePermissions] = useState([]);
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [rememberedDevice, setRememberedDevice] = useState(() => readRememberedDevice());
+  const [loginForm, setLoginForm] = useState(() => {
+    const remembered = readRememberedDevice();
+    return { email: remembered?.email || "", password: "", remember_device: Boolean(remembered) };
+  });
   const [signupForm, setSignupForm] = useState({
     name: "",
     email: "",
@@ -296,12 +392,15 @@ function App() {
     phone: "",
     category: "5ta",
     preferred_side: "indiferente",
+    remember_device: true,
   });
   const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "jugador" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(pageFromLocation);
+  const [navOpen, setNavOpen] = useState(false);
   const selectedEventIdRef = useRef(selectedEventId);
+  const navMenuRef = useRef(null);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === Number(selectedEventId)),
@@ -340,11 +439,31 @@ function App() {
       partners: "/partners",
       signup: "/crear-cuenta",
     };
+    setNavOpen(false);
     setPage(nextPage);
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", paths[nextPage] || "/");
     }
   }
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+
+    function closeOnOutsideClick(event) {
+      if (!navMenuRef.current?.contains(event.target)) setNavOpen(false);
+    }
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setNavOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [navOpen]);
 
   async function loadBase(userOverride = authUser, permissionOverride = currentPermissions) {
     const effectiveUser = userOverride;
@@ -526,7 +645,13 @@ function App() {
   }, [selectedEventId]);
 
   useEffect(() => {
-    if (page !== "events" || !selectedEventId || !authUser || !canAccess("events")) return undefined;
+    const pageNeedsLiveData = {
+      events: canAccess("events"),
+      matches: canAccess("events"),
+      results: canAccess("results"),
+      tablet: canAccess("tablet"),
+    };
+    if (!pageNeedsLiveData[page] || !selectedEventId || !authUser) return undefined;
     const interval = window.setInterval(() => {
       Promise.all([
         loadBase().catch((err) => setError(err.message)),
@@ -534,7 +659,7 @@ function App() {
       ]);
     }, 8000);
     return () => window.clearInterval(interval);
-  }, [page, selectedEventId, authUser?.id, currentPermissions.events]);
+  }, [page, selectedEventId, authUser?.id, currentPermissions.events, currentPermissions.results, currentPermissions.tablet]);
 
   useEffect(() => {
     if (page === "events") return;
@@ -542,10 +667,10 @@ function App() {
       selectEventId(activeEvents[0].id);
       return;
     }
-    if (selectedEvent && !isEventActive(selectedEvent)) {
+    if (selectedEvent && !isEventActive(selectedEvent) && !(page === "results" && authUser?.role !== "jugador")) {
       selectEventId(activeEvents[0]?.id || "");
     }
-  }, [page, selectedEventId, selectedEvent?.id, selectedEvent?.is_active, activeEvents]);
+  }, [page, selectedEventId, selectedEvent?.id, selectedEvent?.is_active, activeEvents, authUser?.role]);
 
   useEffect(() => {
     function handlePopState() {
@@ -560,6 +685,8 @@ function App() {
     await run(async () => {
       const payload = {
         ...eventForm,
+        event_type: eventForm.event_type || "hombres",
+        categories: eventForm.categories || defaultCategoriesForEventType(eventForm.event_type || "hombres"),
         price: Number(eventForm.price),
         capacity: Number(eventForm.capacity),
         category_configs: (eventForm.category_configs || [])
@@ -628,7 +755,7 @@ function App() {
 
   async function submitGenerateFixture() {
     await run(async () => {
-      const courts = fixtureForm.courts.split(",").map((court) => court.trim()).filter(Boolean);
+      const courts = parseCourtList(fixtureForm.courts);
       const timing = deriveFixtureTiming(selectedEvent?.schedule || eventForm.schedule, Number(fixtureForm.warmup_minutes || 0));
       const isGroupsWithFinals = fixtureForm.mode === "groups_finals";
       await api.generateFixture(selectedEventId, isGroupsWithFinals ? 3 : Number(fixtureForm.guaranteed_matches), courts, {
@@ -643,7 +770,7 @@ function App() {
 
   async function submitGenerateBracket() {
     await run(async () => {
-      const courts = fixtureForm.courts.split(",").map((court) => court.trim()).filter(Boolean);
+      const courts = parseCourtList(fixtureForm.courts);
       await api.generateBracket(selectedEventId, courts);
     });
   }
@@ -677,13 +804,10 @@ function App() {
 
     setLoading(true);
     try {
-      const eventCategories = [
-        ...new Set([
-          ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
-          ...(selectedEvent?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
-        ]),
-      ];
-      const category = categoryLabel(publicForm.category || eventCategories[0] || "1era");
+      const eventCategories = eventCategoriesForEvent(selectedEvent);
+      const category = categoryLabel(
+        eventCategories.includes(publicForm.category) ? publicForm.category : eventCategories[0] || "1era"
+      );
       const registration = await api.publicRegister(selectedEventId, {
         player_user_id: authUser?.role === "jugador" ? authUser.id : null,
         name: publicForm.name,
@@ -706,6 +830,7 @@ function App() {
         partnerName: publicForm.partner_name,
         waitlisted: registration.pair?.status === "lista_espera",
       });
+      window.setTimeout(() => navigatePage("player"), 1800);
       setPublicForm(authUser?.role === "jugador" ? {
         ...emptyPublicRegistration,
         name: authUser.name || "",
@@ -748,6 +873,22 @@ function App() {
         pair_one_score: Number(pairOneScore),
         pair_two_score: Number(pairTwoScore),
       });
+    });
+  }
+
+  async function submitOfficialResult(matchId, pairOneScore, pairTwoScore) {
+    await run(async () => {
+      await api.registerResult(selectedEventId, matchId, {
+        pair_one_score: Number(pairOneScore),
+        pair_two_score: Number(pairTwoScore),
+      });
+    });
+  }
+
+  async function submitFinalRankingFixture(finalMatches) {
+    if (!selectedEventId || !finalMatches.length) return;
+    await run(async () => {
+      await api.createMatchesBulk(selectedEventId, finalMatches, false);
     });
   }
 
@@ -804,6 +945,34 @@ function App() {
     });
   }
 
+  async function toggleFixtureVisible() {
+    if (!selectedEventId || !selectedEvent) return;
+    await run(async () => {
+      const updated = await api.updateEvent(selectedEventId, { fixture_visible: !selectedEvent.fixture_visible });
+      setEvents((prev) => prev.map((ev) => ev.id === updated.id ? updated : ev));
+    });
+  }
+
+  async function finishSelectedEvent() {
+    if (!selectedEventId || !selectedEvent) return;
+    const pendingMatches = matches.filter((match) => !matchHasResult(match)).length;
+    const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
+    confirmAction({
+      tone: pendingMatches || conflictCount ? "danger" : "default",
+      title: "Finalizar evento",
+      message: pendingMatches || conflictCount
+        ? `Todavía hay ${pendingMatches} partido(s) sin resultado y ${conflictCount} reporte(s) en conflicto. El evento quedará cerrado igualmente.`
+        : `Se cerrará "${selectedEvent.name}" y quedarán consolidados sus resultados y ranking.`,
+      confirmLabel: pendingMatches || conflictCount ? "Finalizar de todas formas" : "Finalizar evento",
+      onConfirm: async () => {
+        await run(async () => {
+          await api.recalculateStandings(selectedEventId);
+          await api.updateEvent(selectedEventId, { status: "finished", is_active: false });
+        });
+      },
+    });
+  }
+
   async function activateSelectedEvent() {
     if (!selectedEventId || !selectedEvent) return;
     await run(async () => {
@@ -855,8 +1024,14 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const response = await api.login(loginForm);
-      setAuthToken(response.access_token);
+      const { remember_device: rememberDevice, ...credentials } = loginForm;
+      const response = await api.login(credentials);
+      setAuthToken(response.access_token, { persistent: Boolean(rememberDevice) });
+      if (rememberDevice) setRememberedDevice(writeRememberedDevice(response.user, credentials.email));
+      else {
+        clearRememberedDevice();
+        setRememberedDevice(null);
+      }
       setAuthUser(response.user);
       const permissionData = await loadPermissions(response.user);
       await loadBase(response.user, permissionData);
@@ -875,11 +1050,17 @@ function App() {
     setError("");
     setSignupNotice(null);
     try {
+      const { remember_device: rememberDevice, ...playerData } = signupForm;
       const response = await api.registerPlayer({
-        ...signupForm,
+        ...playerData,
         phone: signupForm.phone || null,
       });
-      setAuthToken(response.access_token);
+      setAuthToken(response.access_token, { persistent: Boolean(rememberDevice) });
+      if (rememberDevice) setRememberedDevice(writeRememberedDevice(response.user, playerData.email));
+      else {
+        clearRememberedDevice();
+        setRememberedDevice(null);
+      }
       setAuthUser(response.user);
       await loadPermissions(response.user);
       setPublicForm({
@@ -919,6 +1100,12 @@ function App() {
     setUsers([]);
     setCurrentPermissions(publicPermissions);
     setRolePermissions([]);
+  }
+
+  function forgetRememberedDevice() {
+    clearRememberedDevice();
+    setRememberedDevice(null);
+    setLoginForm((current) => ({ ...current, email: "", password: "", remember_device: false }));
   }
 
   async function submitUser(event) {
@@ -998,6 +1185,7 @@ function App() {
       pairs={pairs}
       goSignup={() => navigatePage("signup")}
       goLogin={() => navigatePage("events")}
+      goProfile={() => navigatePage("player")}
     />
   ) : page === "player" ? (
     <PlayerProfile
@@ -1047,11 +1235,12 @@ function App() {
     />
   ) : page === "results" ? (
     <PublicResults
-      events={activeEvents}
+      events={authUser && authUser.role !== "jugador" ? events : activeEvents}
       pairs={pairs}
       matches={matches}
       resultSubmissions={resultSubmissions}
       standings={standings}
+      ranking={ranking}
       authUser={authUser}
       selectedEventId={selectedEventId}
       setSelectedEventId={selectEventId}
@@ -1059,6 +1248,18 @@ function App() {
       form={publicResultForm}
       setForm={setPublicResultForm}
       onSubmit={submitPublicResult}
+      onSubmitMatch={submitPlayerMatchResult}
+      rankingConfig={rankingConfigForm}
+      setRankingConfig={setRankingConfigForm}
+      onSaveRanking={submitRankingConfig}
+      onOfficialResult={submitOfficialResult}
+      onGenerateFinalFixture={submitFinalRankingFixture}
+      onFinishEvent={finishSelectedEvent}
+      onToggleFixtureVisible={toggleFixtureVisible}
+      onRefresh={() => run(loadEventData)}
+      loading={loading}
+      canEditScores={canAccess("tablet")}
+      canManageEvent={canAccess("events")}
     />
   ) : page === "tablet" ? (
     <TabletResults
@@ -1118,6 +1319,7 @@ function App() {
       updateRegistration={updateRegistration}
       confirmAction={confirmAction}
       authUser={authUser}
+      loading={loading}
       run={run}
       forcedTab="matches"
     /> : <AccessDenied moduleName="Partidos" />
@@ -1191,36 +1393,71 @@ function App() {
       updateRegistration={updateRegistration}
       confirmAction={confirmAction}
       authUser={authUser}
+      loading={loading}
       run={run}
     /> : <AccessDenied moduleName="Eventos" />
   );
 
+  const navigationItems = [
+    authUser?.role === "jugador" && { key: "player", label: "Mi perfil", icon: UserPlus },
+    authUser?.role === "jugador" && { key: "partners", label: "Partners", icon: Users },
+    canAccess("events") && { key: "events", label: "Eventos", icon: CalendarPlus },
+    canAccess("events") && { key: "matches", label: "Partidos", icon: Swords },
+    canAccess("results") && { key: "results", label: "Resultados", icon: FileCheck2 },
+    canAccess("tablet") && { key: "tablet", label: "Tablet", icon: Clipboard },
+    canAccess("register") && { key: "register", label: "Registro", icon: UserPlus },
+    canAccess("users") && { key: "users", label: "Usuarios", icon: Users },
+    canAccess("profiles") && { key: "profiles", label: "Perfiles", icon: ListChecks },
+  ].filter(Boolean);
+  const activeNavigationItem = navigationItems.find((item) => item.key === page);
+
   const appHeader = (
     <header className="topbar">
-      <div>
+      <div className="topbar-brand">
         <p className="eyebrow">Padel Manager</p>
         <h1>Gestión de eventos</h1>
       </div>
       <div className="top-actions">
         <nav className="app-nav" aria-label="Secciones">
-          {authUser?.role === "jugador" && <button className={page === "player" ? "active" : ""} onClick={() => navigatePage("player")}>Mi perfil</button>}
-          {authUser?.role === "jugador" && <button className={page === "partners" ? "active" : ""} onClick={() => navigatePage("partners")}>Partners</button>}
-          {canAccess("events") && <button className={page === "events" ? "active" : ""} onClick={() => navigatePage("events")}>Eventos</button>}
-          {canAccess("events") && <button className={page === "matches" ? "active" : ""} onClick={() => navigatePage("matches")}>Partidos</button>}
-          {canAccess("register") && <button className={page === "register" ? "active" : ""} onClick={() => navigatePage("register")}>Registro</button>}
-          {canAccess("results") && <button className={page === "results" ? "active" : ""} onClick={() => navigatePage("results")}>Resultados</button>}
-          {canAccess("users") && (
-            <button className={page === "users" ? "active" : ""} onClick={() => navigatePage("users")}>Usuarios</button>
-          )}
-          {canAccess("profiles") && (
-            <button className={page === "profiles" ? "active" : ""} onClick={() => navigatePage("profiles")}>Perfiles</button>
-          )}
-          {canAccess("tablet") && <button className={page === "tablet" ? "active" : ""} onClick={() => navigatePage("tablet")}>Tablet</button>}
+          {navigationItems.map(({ key, label }) => (
+            <button key={key} className={page === key ? "active" : ""} onClick={() => navigatePage(key)}>{label}</button>
+          ))}
         </nav>
         <button className="icon-button" onClick={() => run(loadBase)} disabled={loading} title="Actualizar">
           <RefreshCw size={18} />
         </button>
         {authUser && <button className="secondary-action" type="button" onClick={logout}>Salir</button>}
+      </div>
+      <div className="mobile-nav" ref={navMenuRef}>
+        <button
+          className="nav-menu-trigger"
+          type="button"
+          aria-expanded={navOpen}
+          aria-controls="mobile-navigation-menu"
+          onClick={() => setNavOpen((current) => !current)}
+        >
+          <span>{activeNavigationItem?.label || "Menú"}</span>
+          <Menu size={20} />
+        </button>
+        {navOpen && (
+          <div className="mobile-nav-menu" id="mobile-navigation-menu">
+            <nav aria-label="Secciones">
+              {navigationItems.map(({ key, label, icon: Icon }) => (
+                <button key={key} className={page === key ? "active" : ""} onClick={() => navigatePage(key)}>
+                  <Icon size={18} />
+                  <span>{label}</span>
+                  {page === key && <Check className="mobile-nav-check" size={17} />}
+                </button>
+              ))}
+            </nav>
+            <div className="mobile-nav-actions">
+              <button type="button" onClick={() => { setNavOpen(false); run(loadBase); }} disabled={loading}>
+                <RefreshCw size={18} /> Actualizar
+              </button>
+              {authUser && <button type="button" onClick={logout}><LogOut size={18} /> Salir</button>}
+            </div>
+          </div>
+        )}
       </div>
     </header>
   );
@@ -1230,7 +1467,15 @@ function App() {
       return (
         <main className="tablet-shell">
           {error && <div className="alert tablet-alert">{error}</div>}
-          <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} compact />
+          <LoginPage
+            form={loginForm}
+            setForm={setLoginForm}
+            onSubmit={submitLogin}
+            loading={loading}
+            compact
+            rememberedDevice={rememberedDevice}
+            onForgetDevice={forgetRememberedDevice}
+          />
         </main>
       );
     }
@@ -1247,7 +1492,15 @@ function App() {
     return (
       <main className="app-shell">
         {error && <div className="alert">{error}</div>}
-        <LoginPage form={loginForm} setForm={setLoginForm} onSubmit={submitLogin} loading={loading} goSignup={() => navigatePage("signup")} />
+        <LoginPage
+          form={loginForm}
+          setForm={setLoginForm}
+          onSubmit={submitLogin}
+          loading={loading}
+          goSignup={() => navigatePage("signup")}
+          rememberedDevice={rememberedDevice}
+          onForgetDevice={forgetRememberedDevice}
+        />
       </main>
     );
   }
@@ -1322,8 +1575,9 @@ function ConfirmModal({ dialog, setDialog, loading }) {
   );
 }
 
-function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup }) {
+function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup, rememberedDevice, onForgetDevice }) {
   const [showPassword, setShowPassword] = useState(false);
+  const hasRememberedDevice = Boolean(rememberedDevice?.email);
 
   return (
     <section className={compact ? "login-page compact" : "login-page"}>
@@ -1331,13 +1585,23 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
         <p className="eyebrow">Acceso AmarPadel</p>
         <h1>{compact ? "Acceso operador" : "Entra a tu cuenta"}</h1>
         <p>{compact ? "Ingresa con una cuenta autorizada para cargar resultados." : "Usa tu cuenta jugador o administrativa para continuar."}</p>
+        {hasRememberedDevice && (
+          <div className="remembered-device-card">
+            <div>
+              <span>Dispositivo recordado</span>
+              <strong>{rememberedDevice.name || rememberedDevice.email}</strong>
+              <small>{rememberedDevice.email}</small>
+            </div>
+            <button type="button" className="secondary-action" onClick={onForgetDevice}>No soy yo</button>
+          </div>
+        )}
         <form onSubmit={onSubmit} className="login-form" autoComplete="off">
           <label className="form-field">
             <span>Email</span>
             <input
               type="email"
               name="amar-login-email"
-              autoComplete="off"
+              autoComplete="email"
               value={form.email}
               onChange={(event) => setForm({ ...form, email: event.target.value })}
               required
@@ -1349,7 +1613,7 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
               <input
                 type={showPassword ? "text" : "password"}
                 name="amar-login-password"
-                autoComplete="new-password"
+                autoComplete="current-password"
                 value={form.password}
                 onChange={(event) => setForm({ ...form, password: event.target.value })}
                 required
@@ -1364,6 +1628,17 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+          </label>
+          <label className="remember-device-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(form.remember_device)}
+              onChange={(event) => setForm({ ...form, remember_device: event.target.checked })}
+            />
+            <span>
+              <strong>Recordar este dispositivo</strong>
+              <small>Mantiene tu sesión y tu email listos en este navegador. No guarda tu contraseña.</small>
+            </span>
           </label>
           <button disabled={loading}>Entrar</button>
         </form>
@@ -1381,6 +1656,8 @@ function LoginPage({ form, setForm, onSubmit, loading, compact = false, goSignup
 }
 
 function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goRegister, goLogin }) {
+  const [showPassword, setShowPassword] = useState(false);
+
   useEffect(() => {
     if (!notice) return undefined;
     function closeOnEscape(event) {
@@ -1448,11 +1725,28 @@ function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goReg
             </label>
             <label className="form-field">
               <span>Email</span>
-              <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
+              <input type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="tu@email.com" required />
             </label>
             <label className="form-field">
               <span>Contraseña</span>
-              <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+              <div className="password-input-wrap">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={(event) => setForm({ ...form, password: event.target.value })}
+                  required
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </label>
             <label className="form-field">
               <span>Teléfono</span>
@@ -1469,6 +1763,17 @@ function SignupPage({ form, setForm, onSubmit, loading, notice, setNotice, goReg
                 <option value="reves">Revés</option>
                 <option value="indiferente">Indiferente</option>
               </select>
+            </label>
+            <label className="remember-device-toggle wide-field">
+              <input
+                type="checkbox"
+                checked={Boolean(form.remember_device)}
+                onChange={(event) => setForm({ ...form, remember_device: event.target.checked })}
+              />
+              <span>
+                <strong>Recordar este dispositivo</strong>
+                <small>Después de crear tu perfil, este navegador sabrá quién eres para entrar más rápido.</small>
+              </span>
             </label>
             <button disabled={loading}>Crear perfil y continuar</button>
           </form>
@@ -1792,9 +2097,11 @@ function PlayerProfile({
             <article className="player-focus-card next">
               <div className="player-card-head">
                 <h2><Clock size={18} /> Próximo partido</h2>
-                <span>{nextMatch ? parseFixtureRoundLabel(nextMatch.round_name).time || parseFixtureRoundLabel(nextMatch.round_name).turn : "Sin pendientes"}</span>
+                <span>{selectedEvent?.fixture_visible && nextMatch ? parseFixtureRoundLabel(nextMatch.round_name).time || parseFixtureRoundLabel(nextMatch.round_name).turn : "—"}</span>
               </div>
-              {nextMatch ? (
+              {!selectedEvent?.fixture_visible ? (
+                <p className="empty">El fixture aún no está publicado.</p>
+              ) : nextMatch ? (
                 <MatchSummary match={nextMatch} pairById={pairById} myPairId={myPair.id} />
               ) : (
                 <p className="empty">No tienes partidos pendientes en este evento.</p>
@@ -1833,9 +2140,14 @@ function PlayerProfile({
           <section className="player-match-list">
             <div className="block-head">
               <h2><FileCheck2 size={18} /> Mis partidos</h2>
-              <span>{pendingMatches.length} pendiente{pendingMatches.length === 1 ? "" : "s"}</span>
+              <span>{selectedEvent?.fixture_visible ? `${pendingMatches.length} pendiente${pendingMatches.length === 1 ? "" : "s"}` : "no publicados"}</span>
             </div>
-            {myMatches.length ? myMatches.map((match) => (
+            {!selectedEvent?.fixture_visible ? (
+              <div className="player-empty compact">
+                <strong>Fixture no publicado</strong>
+                <span>La organización aún no ha publicado los partidos. Te avisaremos cuando estén disponibles.</span>
+              </div>
+            ) : myMatches.length ? myMatches.map((match) => (
               <PlayerMatchCard
                 key={match.id}
                 match={match}
@@ -2018,6 +2330,7 @@ function PlayerMatchCard({ match, pairById, myPairId, submission, score, setScor
           <span>{pairOne ? pairName(pairOne) : "Pareja 1"}</span>
           <input
             type="number"
+            inputMode="numeric"
             min="0"
             value={score.pair_one_score}
             onChange={(event) => setScore(match.id, "pair_one_score", event.target.value)}
@@ -2029,6 +2342,7 @@ function PlayerMatchCard({ match, pairById, myPairId, submission, score, setScor
           <span>{pairTwo ? pairName(pairTwo) : "Pareja 2"}</span>
           <input
             type="number"
+            inputMode="numeric"
             min="0"
             value={score.pair_two_score}
             onChange={(event) => setScore(match.id, "pair_two_score", event.target.value)}
@@ -2146,136 +2460,178 @@ function PartnerFinder({
   );
 }
 
-function PublicResults({ events, pairs, matches, resultSubmissions, standings, authUser, selectedEventId, setSelectedEventId, selectedEvent, form, setForm, onSubmit }) {
-  const userMatches = authUser?.role === "jugador"
-    ? matches.filter((match) => {
-      const one = pairs.find((pair) => pair.id === match.pair_one_id);
-      const two = pairs.find((pair) => pair.id === match.pair_two_id);
-      return pairHasUser(one, authUser.id) || pairHasUser(two, authUser.id);
-    })
-    : [];
-  const roundNames = [...new Set(userMatches.map((match) => match.round_name || "Grupo"))];
-  const activeRound = form.round_name || roundNames[0] || "";
-  const visibleMatches = activeRound ? userMatches.filter((match) => (match.round_name || "Grupo") === activeRound) : userMatches;
-  const selectedMatch = visibleMatches.find((match) => match.id === Number(form.match_id));
-  const selectedSubmission = selectedMatch ? resultSubmissions.find((submission) => submission.match_id === selectedMatch.id && submission.submitted_by_user_id === authUser?.id) : null;
-  const pairOne = selectedMatch ? pairs.find((pair) => pair.id === selectedMatch.pair_one_id) : null;
-  const pairTwo = selectedMatch ? pairs.find((pair) => pair.id === selectedMatch.pair_two_id) : null;
-  const conflictCount = resultSubmissions.filter((submission) => submission.status === "conflicto").length;
-  const standingsByCategory = standings.reduce((groups, standing) => {
-    const category = standing.pair.category || "Sin categoria";
-    groups[category] = [...(groups[category] || []), standing];
-    return groups;
-  }, {});
-  const rankingConfig = { ...defaultRankingConfig, ...(selectedEvent?.ranking_config || {}) };
-  const tiebreakerLabels = Object.fromEntries(rankingTiebreakerOptions.map((option) => [option.value, option.label]));
-  const tiebreakers = (rankingConfig.tiebreakers || defaultRankingConfig.tiebreakers)
-    .map((criterion) => tiebreakerLabels[criterion])
-    .filter(Boolean);
+function PublicResults({
+  events,
+  pairs,
+  matches,
+  resultSubmissions,
+  standings,
+  ranking,
+  authUser,
+  selectedEventId,
+  setSelectedEventId,
+  selectedEvent,
+  form,
+  setForm,
+  onSubmit,
+  onSubmitMatch,
+  rankingConfig,
+  setRankingConfig,
+  onSaveRanking,
+  onOfficialResult,
+  onGenerateFinalFixture,
+  onFinishEvent,
+  onToggleFixtureVisible,
+  onRefresh,
+  loading,
+  canEditScores,
+  canManageEvent,
+}) {
+  if (authUser && authUser.role !== "jugador" && (canEditScores || canManageEvent)) {
+    return (
+      <ResultsControlCenter
+        events={events}
+        pairs={pairs}
+        matches={matches}
+        resultSubmissions={resultSubmissions}
+        standings={standings}
+        ranking={ranking}
+        selectedEventId={selectedEventId}
+        setSelectedEventId={setSelectedEventId}
+        selectedEvent={selectedEvent}
+        rankingConfig={rankingConfig}
+        setRankingConfig={setRankingConfig}
+        onSaveRanking={onSaveRanking}
+        onOfficialResult={onOfficialResult}
+        onGenerateFinalFixture={onGenerateFinalFixture}
+        onFinishEvent={onFinishEvent}
+        onToggleFixtureVisible={onToggleFixtureVisible}
+        onRefresh={onRefresh}
+        loading={loading}
+        canEditScores={canEditScores}
+        canManageEvent={canManageEvent}
+      />
+    );
+  }
 
   return (
-    <section className="public-page">
-      <div className="public-hero results-hero">
-        <p className="eyebrow">Carga de resultados</p>
-        <h2>Anotar marcador del partido</h2>
-        <p>Solo puedes reportar resultados de tus partidos. Si otro jugador reporta algo distinto, la mesa verá una alerta.</p>
-      </div>
+    <PlayerResultsView
+      events={events}
+      pairs={pairs}
+      matches={matches}
+      resultSubmissions={resultSubmissions}
+      standings={standings}
+      authUser={authUser}
+      selectedEventId={selectedEventId}
+      setSelectedEventId={setSelectedEventId}
+      selectedEvent={selectedEvent}
+      onSubmitMatch={onSubmitMatch}
+      loading={loading}
+    />
+  );
+}
 
-      <div className="public-grid">
-        <aside className="panel">
-          <h2><ExternalLink size={18} /> Evento</h2>
-          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)} required>
-            <option value="">Seleccionar evento</option>
-            {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+function PlayerResultsView({
+  events,
+  pairs,
+  matches,
+  resultSubmissions,
+  standings,
+  authUser,
+  selectedEventId,
+  setSelectedEventId,
+  selectedEvent,
+  onSubmitMatch,
+  loading,
+}) {
+  const [activeTab, setActiveTab] = useState("matches");
+  const [scores, setScores] = useState({});
+
+  const pairById = useMemo(() => new Map(pairs.map((p) => [p.id, p])), [pairs]);
+  const myPair = useMemo(
+    () => (authUser?.role === "jugador" ? pairs.find((p) => pairHasUser(p, authUser.id)) : null),
+    [pairs, authUser],
+  );
+  const userMatches = useMemo(
+    () => (authUser?.role === "jugador"
+      ? matches.filter((m) => pairHasUser(pairById.get(m.pair_one_id), authUser.id) || pairHasUser(pairById.get(m.pair_two_id), authUser.id))
+      : []),
+    [matches, pairById, authUser],
+  );
+  const submissionByMatch = useMemo(
+    () => new Map(resultSubmissions.filter((s) => s.submitted_by_user_id === authUser?.id).map((s) => [s.match_id, s])),
+    [resultSubmissions, authUser],
+  );
+  const roundGroups = useMemo(() => {
+    const groups = new Map();
+    userMatches.forEach((match) => {
+      const key = match.round_name || "Partido";
+      if (!groups.has(key)) {
+        const parsed = parseFixtureRoundLabel(key);
+        groups.set(key, { key, label: parsed.turn || key, time: parsed.time, matches: [] });
+      }
+      groups.get(key).matches.push(match);
+    });
+    return [...groups.values()];
+  }, [userMatches]);
+  const standingsByCategory = useMemo(() => standings.reduce((acc, s) => {
+    const cat = s.pair.category || "Sin categoria";
+    acc[cat] = [...(acc[cat] || []), s];
+    return acc;
+  }, {}), [standings]);
+  const conflictCount = resultSubmissions.filter((s) => s.status === "conflicto").length;
+  const pendingCount = userMatches.filter((m) => !matchHasResult(m)).length;
+
+  useEffect(() => {
+    setScores(Object.fromEntries(
+      userMatches.map((m) => [m.id, {
+        pair_one_score: m.pair_one_score !== null && m.pair_one_score !== undefined ? String(m.pair_one_score) : "",
+        pair_two_score: m.pair_two_score !== null && m.pair_two_score !== undefined ? String(m.pair_two_score) : "",
+      }]),
+    ));
+  }, [matches]);
+
+  function setMatchScore(matchId, field, value) {
+    setScores((prev) => ({
+      ...prev,
+      [matchId]: {
+        pair_one_score: prev[matchId]?.pair_one_score ?? "",
+        pair_two_score: prev[matchId]?.pair_two_score ?? "",
+        [field]: String(Math.max(0, Number(value || 0))),
+      },
+    }));
+  }
+
+  function submitMatch(matchId) {
+    const s = scores[matchId] || {};
+    onSubmitMatch(matchId, s.pair_one_score, s.pair_two_score);
+  }
+
+  return (
+    <section className="public-page player-results-page">
+      <div className="pr-header">
+        <div className="pr-header-row">
+          <div className="pr-header-info">
+            <p className="eyebrow">Resultados</p>
+            <strong>{selectedEvent ? selectedEvent.name : "Selecciona un evento"}</strong>
+            {selectedEvent && <small>{selectedEvent.date}{selectedEvent.place ? ` · ${selectedEvent.place}` : ""}{selectedEvent.schedule ? ` · ${selectedEvent.schedule}` : ""}</small>}
+          </div>
+          <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)}>
+            <option value="">Evento</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
           </select>
-          {selectedEvent && (
-            <div className="event-ticket">
-              <strong>{selectedEvent.name}</strong>
-              <span>{selectedEvent.date}</span>
-              <span>{selectedEvent.place}</span>
-              <span>{selectedEvent.schedule}</span>
-            </div>
-          )}
-        </aside>
-
-        <section className="panel">
-          <h2><FileCheck2 size={18} /> Resultado</h2>
-          {authUser?.role !== "jugador" ? (
-            <div className="result-state-card">
-              <strong>Cuenta jugador requerida</strong>
-              <span>Entra con tu cuenta jugador para reportar solo tus partidos.</span>
-            </div>
-          ) : !userMatches.length ? (
-            <div className="result-state-card">
-              <strong>Sin partidos asignados</strong>
-              <span>No encontramos partidos vinculados a tu cuenta en este evento.</span>
-            </div>
-          ) : (
-          <form onSubmit={onSubmit} className="score-form">
-            <select
-              value={activeRound}
-              onChange={(e) => setForm({ ...form, round_name: e.target.value, match_id: "", pair_one_score: "", pair_two_score: "" })}
-              required
-            >
-              {roundNames.length ? (
-                roundNames.map((roundName, index) => (
-                  <option key={roundName} value={roundName}>Ronda {index + 1}</option>
-                ))
-              ) : (
-                <option value="">Sin rondas disponibles</option>
-              )}
-            </select>
-            <select value={form.match_id} onChange={(e) => setForm({ ...form, match_id: e.target.value })} required>
-              <option value="">Seleccionar partido</option>
-              {visibleMatches.map((match) => {
-                const one = pairs.find((pair) => pair.id === match.pair_one_id);
-                const two = pairs.find((pair) => pair.id === match.pair_two_id);
-                const label = `${one ? pairName(one) : `Pareja ${match.pair_one_id}`} vs ${two ? pairName(two) : `Pareja ${match.pair_two_id}`}`;
-                return <option key={match.id} value={match.id}>{label}</option>;
-              })}
-            </select>
-
-            {selectedMatch && (
-              <>
-              {selectedSubmission && (
-                <div className={`result-state-card ${selectedSubmission.status}`}>
-                  <strong>{selectedSubmission.status === "conflicto" ? "Resultado en conflicto" : selectedSubmission.status === "confirmado" ? "Resultado confirmado" : "Resultado pendiente"}</strong>
-                  <span>Tu reporte: {selectedSubmission.pair_one_score}-{selectedSubmission.pair_two_score}</span>
-                </div>
-              )}
-              <div className="scoreboard">
-                <div>
-                  <span>{pairOne ? pairName(pairOne) : "Pareja 1"}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={form.pair_one_score}
-                    onChange={(e) => setForm({ ...form, pair_one_score: e.target.value })}
-                    required
-                  />
-                </div>
-                <strong>VS</strong>
-                <div>
-                  <span>{pairTwo ? pairName(pairTwo) : "Pareja 2"}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={form.pair_two_score}
-                    onChange={(e) => setForm({ ...form, pair_two_score: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-              </>
-            )}
-
-            <button disabled={!selectedEventId || !form.match_id}><FileCheck2 size={16} /> Reportar resultado</button>
-          </form>
-          )}
-        </section>
+        </div>
       </div>
+
+      <nav className="pr-tabs">
+        <button type="button" className={activeTab === "matches" ? "active" : ""} onClick={() => setActiveTab("matches")}>
+          <FileCheck2 size={16} /> Mis partidos
+          {pendingCount > 0 && <span>{pendingCount}</span>}
+        </button>
+        <button type="button" className={activeTab === "ranking" ? "active" : ""} onClick={() => setActiveTab("ranking")}>
+          <Medal size={16} /> Ranking
+        </button>
+      </nav>
 
       {conflictCount > 0 && (
         <div className="fixture-collision-alert">
@@ -2284,61 +2640,372 @@ function PublicResults({ events, pairs, matches, resultSubmissions, standings, a
         </div>
       )}
 
-      <section className="panel">
-        <h2><Medal size={18} /> Ranking por categoría</h2>
-        <div className="ranking-formula" aria-label="Fórmula del ranking">
-          <strong>Fórmula de puntos</strong>
-          <span>
-            Pts = G × {rankingConfig.win_points} + E × {rankingConfig.draw_points} + P × {rankingConfig.loss_points}
-          </span>
-          <small>Desempates: {tiebreakers.join(" → ") || "Sin criterios configurados"}.</small>
+      {activeTab === "matches" && (
+        <div className="pr-matches">
+          {authUser?.role !== "jugador" ? (
+            <div className="result-state-card"><strong>Cuenta jugador requerida</strong><span>Entra con tu cuenta jugador para ver y reportar tus partidos.</span></div>
+          ) : !selectedEvent ? (
+            <div className="result-state-card"><strong>Selecciona un evento</strong><span>Elige el evento en el selector de arriba.</span></div>
+          ) : !selectedEvent.fixture_visible ? (
+            <div className="result-state-card"><strong>Partidos no publicados aún</strong><span>La organización aún no ha publicado el fixture. Vuelve más tarde.</span></div>
+          ) : !userMatches.length ? (
+            <div className="result-state-card"><strong>Sin partidos asignados</strong><span>Cuando la organización genere el fixture, tus partidos aparecerán aquí.</span></div>
+          ) : roundGroups.map((group) => (
+            <div key={group.key} className="pr-round-group">
+              <div className="pr-round-header">
+                <strong>{group.label}</strong>
+                {group.time && <span>{group.time}</span>}
+                <em>{group.matches.filter((m) => matchHasResult(m)).length}/{group.matches.length} jugados</em>
+              </div>
+              {group.matches.map((match) => (
+                <PlayerMatchCard
+                  key={match.id}
+                  match={match}
+                  pairById={pairById}
+                  myPairId={myPair?.id}
+                  submission={submissionByMatch.get(match.id)}
+                  score={scores[match.id] || { pair_one_score: "", pair_two_score: "" }}
+                  setScore={setMatchScore}
+                  onSubmit={submitMatch}
+                  loading={loading}
+                />
+              ))}
+            </div>
+          ))}
         </div>
-        <div className="ranking-grid">
-          {Object.entries(standingsByCategory).length ? (
-            Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
-              <article className="ranking-table results-ranking-table" key={category}>
+      )}
+
+      {activeTab === "ranking" && (
+        <div className="pr-ranking">
+          <div className="ranking-grid">
+            {Object.entries(standingsByCategory).length ? Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
+              <article className="ranking-table" key={category}>
                 <div className="ranking-title">
                   <strong>{category}</strong>
                   <span>{categoryStandings.length} parejas</span>
                 </div>
-                <div className="results-ranking-scroll">
-                  <div className="ranking-row results-ranking-row ranking-header">
-                    <span>#</span>
-                    <span>Pareja</span>
-                    <span title="Partidos jugados">J</span>
-                    <span title="Partidos ganados">G</span>
-                    <span title="Partidos empatados">E</span>
-                    <span title="Partidos perdidos">P</span>
-                    <span title="Puntos a favor">PF</span>
-                    <span title="Puntos en contra">PC</span>
-                    <span title="Diferencia entre puntos a favor y en contra">Dif</span>
-                    <span title="Puntos de ranking">Pts</span>
-                  </div>
-                  {categoryStandings.map((standing) => {
-                    const draws = standing.played - standing.won - standing.lost;
-                    return (
-                      <div className="ranking-row results-ranking-row" key={standing.id}>
-                        <span>{standing.position}</span>
-                        <span>{pairName(standing.pair)}</span>
-                        <span>{standing.played}</span>
-                        <span>{standing.won}</span>
-                        <span>{draws}</span>
-                        <span>{standing.lost}</span>
-                        <span>{standing.points_for}</span>
-                        <span>{standing.points_against}</span>
-                        <span>{standing.points_for - standing.points_against}</span>
-                        <span><strong>{standing.points}</strong></span>
-                      </div>
-                    );
-                  })}
+                <div className="ranking-row ranking-header">
+                  <span>#</span><span>Pareja</span><span>J</span><span>G</span><span>Pts</span><span>Dif</span>
                 </div>
+                {categoryStandings.map((standing) => (
+                  <div className={`ranking-row${standing.pair_id === myPair?.id ? " me" : ""}`} key={standing.id}>
+                    <span>{standing.position}</span>
+                    <span className="ranking-pair-name">
+                      <span className="pair-names">
+                        <span className="pair-p1">{standing.pair.player_one?.name || "—"}</span>
+                        <span className={`pair-p2${standing.pair.player_two ? "" : " pair-p2-solo"}`}>{standing.pair.player_two?.name || "busca partner"}</span>
+                      </span>
+                    </span>
+                    <span>{standing.played}</span>
+                    <span>{standing.won}</span>
+                    <span>{standing.points}</span>
+                    <span>{standing.points_for - standing.points_against}</span>
+                  </div>
+                ))}
               </article>
-            ))
-          ) : (
-            <p className="empty">El ranking aparecerá cuando existan parejas o resultados cargados.</p>
-          )}
+            )) : (
+              <p className="empty">El ranking aparecerá cuando existan resultados cargados.</p>
+            )}
+          </div>
         </div>
-      </section>
+      )}
+    </section>
+  );
+}
+
+function ResultsControlCenter({
+  events,
+  pairs,
+  matches,
+  resultSubmissions,
+  standings,
+  ranking,
+  selectedEventId,
+  setSelectedEventId,
+  selectedEvent,
+  rankingConfig,
+  setRankingConfig,
+  onSaveRanking,
+  onOfficialResult,
+  onGenerateFinalFixture,
+  onFinishEvent,
+  onToggleFixtureVisible,
+  onRefresh,
+  loading,
+  canEditScores,
+  canManageEvent,
+}) {
+  const [activeView, setActiveView] = useState("scores");
+  const [roundFilter, setRoundFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [scoreDrafts, setScoreDrafts] = useState({});
+  const [showFinalFixture, setShowFinalFixture] = useState(false);
+  const pairById = useMemo(() => new Map(pairs.map((pair) => [pair.id, pair])), [pairs]);
+  const appliedRankingConfig = useMemo(
+    () => ({ ...defaultRankingConfig, ...(selectedEvent?.ranking_config || {}) }),
+    [selectedEvent?.id, selectedEvent?.ranking_config],
+  );
+  const finalFixturePlans = useMemo(
+    () => computeRankingPlacementFixture({
+      pairs,
+      matches,
+      standings,
+      fixtureConfig: selectedEvent?.fixture_config || {},
+    }),
+    [pairs, matches, standings, selectedEvent?.fixture_config],
+  );
+  const finalRanking = useMemo(() => computeFinalRanking({ pairs, matches }), [pairs, matches]);
+  const completedMatches = matches.filter(matchHasResult);
+  const pendingMatches = matches.filter((match) => !matchHasResult(match));
+  const conflictMatchIds = new Set(resultSubmissions.filter((item) => item.status === "conflicto").map((item) => item.match_id));
+  const categories = [...new Set(pairs.map((pair) => pair.category).filter(Boolean))];
+  const roundDetails = matches.reduce((items, match) => {
+    const name = match.round_name || "Sin ronda";
+    const roundMatch = name.match(/Ronda\s+(\d+)/i);
+    const timeMatch = name.match(/(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/);
+    const phase = name.split("-").map((part) => part.trim()).find((part) => /fase|semi|final/i.test(part)) || "Programación";
+    const key = roundMatch ? `round-${roundMatch[1]}-${timeMatch?.[1] || ""}` : name;
+    if (!items.some((item) => item.key === key)) {
+      items.push({
+        key,
+        number: roundMatch ? Number(roundMatch[1]) : 999,
+        phase,
+        label: roundMatch ? `Ronda ${roundMatch[1]}${timeMatch ? ` · ${timeMatch[1]}–${timeMatch[2]}` : ""}` : name,
+      });
+    }
+    return items;
+  }, []).sort((left, right) => left.number - right.number || left.label.localeCompare(right.label));
+
+  function matchRoundKey(match) {
+    const name = match.round_name || "Sin ronda";
+    const roundMatch = name.match(/Ronda\s+(\d+)/i);
+    const timeMatch = name.match(/(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/);
+    return roundMatch ? `round-${roundMatch[1]}-${timeMatch?.[1] || ""}` : name;
+  }
+
+  function matchesStatus(match) {
+    if (conflictMatchIds.has(match.id)) return "conflict";
+    return matchHasResult(match) ? "complete" : "pending";
+  }
+
+  const contextMatches = matches.filter((match) => {
+    const pair = pairById.get(match.pair_one_id);
+    return (roundFilter === "all" || matchRoundKey(match) === roundFilter)
+      && (categoryFilter === "all" || pair?.category === categoryFilter);
+  });
+  const contextPendingCount = contextMatches.filter((match) => matchesStatus(match) === "pending").length;
+  const contextCompleteCount = contextMatches.filter((match) => matchesStatus(match) === "complete").length;
+  const contextConflictCount = contextMatches.filter((match) => matchesStatus(match) === "conflict").length;
+
+  const visibleMatches = contextMatches.filter((match) => statusFilter === "all" || matchesStatus(match) === statusFilter);
+  const visibleGroups = roundDetails
+    .map((round) => ({ round, matches: visibleMatches.filter((match) => matchRoundKey(match) === round.key) }))
+    .filter((group) => group.matches.length);
+  const progress = matches.length ? Math.round((completedMatches.length / matches.length) * 100) : 0;
+
+  useEffect(() => {
+    setScoreDrafts(Object.fromEntries(matches.map((match) => [match.id, {
+      one: match.pair_one_score ?? "",
+      two: match.pair_two_score ?? "",
+    }])));
+  }, [matches]);
+
+  useEffect(() => {
+    setRankingConfig({ ...defaultRankingConfig, ...(selectedEvent?.ranking_config || {}) });
+  }, [selectedEvent?.id]);
+
+  function updateScore(matchId, side, value) {
+    setScoreDrafts((current) => ({
+      ...current,
+      [matchId]: { ...(current[matchId] || { one: "", two: "" }), [side]: value },
+    }));
+  }
+
+  function goToNextPending() {
+    const next = matches.find((match) => !matchHasResult(match) && !conflictMatchIds.has(match.id));
+    if (!next) return;
+    const pair = pairById.get(next.pair_one_id);
+    setCategoryFilter(pair?.category || "all");
+    setRoundFilter(matchRoundKey(next));
+    setStatusFilter("pending");
+  }
+
+  return (
+    <section className="results-center">
+      <header className="results-center-head">
+        <div>
+          <p className="eyebrow">Mesa de resultados</p>
+          <h2>Cierre y clasificación del evento</h2>
+          <span>Consolida marcadores, resuelve alertas y publica el resultado final.</span>
+        </div>
+        <div className="results-event-picker">
+          <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
+            <option value="">Seleccionar evento</option>
+            {events.map((event) => <option key={event.id} value={event.id}>{event.name}{isEventActive(event) ? "" : " · finalizado"}</option>)}
+          </select>
+          <button className="icon-button" type="button" onClick={onRefresh} disabled={loading} title="Actualizar resultados">
+            <RefreshCw size={18} />
+          </button>
+        </div>
+      </header>
+
+      {!selectedEvent ? <div className="panel empty">Selecciona un evento para gestionar sus resultados.</div> : (
+        <>
+          <div className="results-kpis">
+            <article><span>Progreso</span><strong>{completedMatches.length}/{matches.length}</strong><small>{progress}% cargado</small></article>
+            <article className={pendingMatches.length ? "warning" : "success"}><span>Pendientes</span><strong>{pendingMatches.length}</strong><small>partidos sin cerrar</small></article>
+            <article className={conflictMatchIds.size ? "danger" : "success"}><span>Conflictos</span><strong>{conflictMatchIds.size}</strong><small>requieren revisión</small></article>
+            <article><span>Clasificación</span><strong>{categories.length}</strong><small>categorías activas</small></article>
+          </div>
+
+          <div className="results-progress" aria-label={`${progress}% de resultados cargados`}>
+            <span style={{ width: `${progress}%` }} />
+          </div>
+
+          <nav className="results-tabs" aria-label="Gestión de resultados">
+            <button className={activeView === "scores" ? "active" : ""} onClick={() => setActiveView("scores")}><FileCheck2 size={17} /> Marcadores</button>
+            <button className={activeView === "ranking" ? "active" : ""} onClick={() => setActiveView("ranking")}><Medal size={17} /> Clasificación</button>
+            <button className={activeView === "close" ? "active" : ""} onClick={() => setActiveView("close")}><Trophy size={17} /> Cierre</button>
+          </nav>
+
+          {activeView === "scores" && (
+            <section className="results-score-workspace">
+              <div className={`fixture-visibility-bar ${selectedEvent?.fixture_visible ? "visible" : "hidden"}`}>
+                <div className="fixture-visibility-info">
+                  {selectedEvent?.fixture_visible ? (
+                    <><Eye size={16} /><span>El fixture y los partidos son <strong>visibles</strong> para los jugadores</span></>
+                  ) : (
+                    <><EyeOff size={16} /><span>El fixture está <strong>oculto</strong> para los jugadores</span></>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={`fixture-visibility-toggle ${selectedEvent?.fixture_visible ? "on" : "off"}`}
+                  onClick={onToggleFixtureVisible}
+                  disabled={loading}
+                >
+                  {selectedEvent?.fixture_visible ? <><EyeOff size={15} /> Ocultar a jugadores</> : <><Eye size={15} /> Hacer visible</>}
+                </button>
+              </div>
+              <div className="results-category-tabs" role="group" aria-label="Filtrar por categoría">
+                <button className={categoryFilter === "all" ? "active" : ""} type="button" onClick={() => setCategoryFilter("all")}>Todas <span>{matches.length}</span></button>
+                {categories.map((category) => {
+                  const count = matches.filter((match) => pairById.get(match.pair_one_id)?.category === category).length;
+                  return <button className={categoryFilter === category ? "active" : ""} type="button" key={category} onClick={() => setCategoryFilter(category)}>{category} <span>{count}</span></button>;
+                })}
+              </div>
+              <div className="results-filters">
+                <select value={roundFilter} onChange={(event) => setRoundFilter(event.target.value)}>
+                  <option value="all">Todas las rondas</option>
+                  {roundDetails.map((round) => <option key={round.key} value={round.key}>{round.label}</option>)}
+                </select>
+                <div className="results-status-filter" role="group" aria-label="Estado de los partidos">
+                  <button type="button" className={statusFilter === "pending" ? "active" : ""} onClick={() => setStatusFilter("pending")}>Pendientes <span>{contextPendingCount}</span></button>
+                  <button type="button" className={statusFilter === "complete" ? "active" : ""} onClick={() => setStatusFilter("complete")}>Cerrados <span>{contextCompleteCount}</span></button>
+                  <button type="button" className={statusFilter === "conflict" ? "active danger" : ""} onClick={() => setStatusFilter("conflict")}>Conflictos <span>{contextConflictCount}</span></button>
+                  <button type="button" className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>Todos</button>
+                </div>
+                <button className="secondary-action results-next-button" type="button" onClick={goToNextPending} disabled={!pendingMatches.length}>
+                  <Target size={16} /> Siguiente pendiente
+                </button>
+              </div>
+              <div className="results-match-list">
+                {visibleGroups.map(({ round, matches: roundMatches }) => {
+                  const fullRoundMatches = matches.filter((match) => matchRoundKey(match) === round.key && (categoryFilter === "all" || pairById.get(match.pair_one_id)?.category === categoryFilter));
+                  const roundCompleted = fullRoundMatches.filter(matchHasResult).length;
+                  return (
+                  <section className="results-round-group" key={round.key}>
+                    <header>
+                      <div><strong>{round.label}</strong><span>{round.phase}</span></div>
+                      <span>{roundCompleted}/{fullRoundMatches.length} cerrados</span>
+                    </header>
+                    <div className="results-round-matches">
+                    {roundMatches.map((match) => {
+                  const pairOne = pairById.get(match.pair_one_id);
+                  const pairTwo = pairById.get(match.pair_two_id);
+                  const draft = scoreDrafts[match.id] || { one: "", two: "" };
+                  const hasChanges = String(draft.one) !== String(match.pair_one_score ?? "") || String(draft.two) !== String(match.pair_two_score ?? "");
+                  const isComplete = matchHasResult(match);
+                  return (
+                    <article className={`results-match-row ${conflictMatchIds.has(match.id) ? "conflict" : isComplete ? "complete" : "pending"}`} key={match.id}>
+                      <div className="results-match-meta">
+                        <strong>{pairOne?.category || "Sin categoría"}{conflictMatchIds.has(match.id) ? " · Conflicto" : ""}</strong>
+                        <span>Cancha {match.court || "-"}{/Tiebreak a 7/i.test(match.round_name || "") ? " · Tiebreak a 7" : ""}</span>
+                      </div>
+                      <div className="results-team"><strong>{pairOne ? pairName(pairOne) : `Pareja ${match.pair_one_id}`}</strong></div>
+                      <input disabled={!canEditScores} aria-label={`Puntaje de ${pairOne ? pairName(pairOne) : "pareja 1"}`} type="number" min="0" value={draft.one} onChange={(event) => updateScore(match.id, "one", event.target.value)} />
+                      <span className="results-score-separator">-</span>
+                      <input disabled={!canEditScores} aria-label={`Puntaje de ${pairTwo ? pairName(pairTwo) : "pareja 2"}`} type="number" min="0" value={draft.two} onChange={(event) => updateScore(match.id, "two", event.target.value)} />
+                      <div className="results-team second"><strong>{pairTwo ? pairName(pairTwo) : `Pareja ${match.pair_two_id}`}</strong></div>
+                      <button
+                        type="button"
+                        className={hasChanges || !isComplete ? "" : "secondary-action"}
+                        disabled={!canEditScores || draft.one === "" || draft.two === "" || loading || (!hasChanges && isComplete)}
+                        onClick={() => onOfficialResult(match.id, draft.one, draft.two)}
+                        title={isComplete ? "Actualizar resultado oficial" : "Guardar resultado oficial"}
+                        aria-label={isComplete ? "Actualizar resultado oficial" : "Guardar resultado oficial"}
+                      >
+                        <Save size={16} />
+                      </button>
+                    </article>
+                  );
+                    })}
+                    </div>
+                  </section>
+                  );
+                })}
+                {!visibleGroups.length && (
+                  <div className="results-empty-state">
+                    <Check size={22} />
+                    <strong>No hay partidos con estos filtros</strong>
+                    <span>{statusFilter === "pending" ? "Los partidos seleccionados ya están cerrados." : "Prueba otra ronda, categoría o estado."}</span>
+                    <button type="button" className="secondary-action" onClick={() => { setRoundFilter("all"); setCategoryFilter("all"); setStatusFilter("all"); }}>Ver todos</button>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {activeView === "ranking" && (
+            <div className="ranking-section results-ranking-section">
+              {canManageEvent && <RankingConfigPanel config={rankingConfig} setConfig={setRankingConfig} onSave={onSaveRanking} />}
+              <RankingFormulaPanel config={appliedRankingConfig} />
+              <RankingBlock ranking={ranking} standings={standings} matches={matches} pairs={pairs} detailed />
+              <RankingExplanation standings={standings} config={appliedRankingConfig} />
+              {canManageEvent && (
+                <FinalFixturePanel
+                  plans={finalFixturePlans}
+                  pairs={pairs}
+                  expanded={showFinalFixture}
+                  setExpanded={setShowFinalFixture}
+                  loading={loading}
+                  onGenerate={onGenerateFinalFixture}
+                />
+              )}
+              <FinalRankingBlock categories={finalRanking} />
+            </div>
+          )}
+
+          {activeView === "close" && (
+            <div className="results-close-section">
+              <PostEventSummary event={selectedEvent} standings={standings} matches={matches} pairs={pairs} />
+              <article className={`event-close-card ${pendingMatches.length || conflictMatchIds.size ? "warning" : "ready"}`}>
+                <div>
+                  <span>{pendingMatches.length || conflictMatchIds.size ? "Revisión recomendada" : "Evento listo para cerrar"}</span>
+                  <strong>{pendingMatches.length ? `${pendingMatches.length} resultados pendientes` : "Todos los partidos tienen resultado"}</strong>
+                  <small>{conflictMatchIds.size ? `${conflictMatchIds.size} conflicto(s) por resolver.` : "No hay conflictos abiertos."}</small>
+                </div>
+                {canManageEvent && (
+                  <button type="button" onClick={onFinishEvent} disabled={loading || selectedEvent.status === "finished"}>
+                    <Trophy size={17} /> {selectedEvent.status === "finished" ? "Evento finalizado" : "Finalizar evento"}
+                  </button>
+                )}
+              </article>
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }
@@ -2390,6 +3057,7 @@ function EventsPage(props) {
     updateRegistration,
     confirmAction,
     authUser,
+    loading,
     run,
     forcedTab,
   } = props;
@@ -2434,6 +3102,7 @@ function EventsPage(props) {
       schedule: selectedEvent.schedule || "",
       capacity: selectedEvent.capacity ?? 16,
       tournament_type: selectedEvent.tournament_type || "Americano",
+      event_type: selectedEvent.event_type || "hombres",
       category_configs: selectedEvent.category_configs || [],
       ranking_config: selectedEvent.ranking_config || {},
       fixture_config: selectedEvent.fixture_config || {},
@@ -2466,12 +3135,16 @@ function EventsPage(props) {
         <div className="section-head">
           <h2>{forcedTab === "matches" ? <Swords size={18} /> : <ListChecks size={18} />} {forcedTab === "matches" ? "Partidos" : "Operación del evento"}</h2>
           <div className="event-picker">
-            {!forcedTab && <button type="button" className="secondary-action" onClick={startNewEvent}>
-              <CalendarPlus size={16} /> Nuevo evento
-            </button>}
-            {!forcedTab && <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
-              Eliminar
-            </button>}
+            {!forcedTab && (
+              <div className="event-picker-actions" aria-label="Acciones de evento">
+                <button type="button" className="secondary-action" onClick={startNewEvent}>
+                  <CalendarPlus size={16} /> Nuevo evento
+                </button>
+                <button type="button" className="danger-action event-picker-action" onClick={deleteSelectedEvent} disabled={!selectedEventId}>
+                  Eliminar
+                </button>
+              </div>
+            )}
             {!forcedTab && <label className="event-history-toggle">
               <input
                 type="checkbox"
@@ -2504,7 +3177,6 @@ function EventsPage(props) {
               <button className={eventTab === "event" ? "active" : ""} onClick={() => setEventTab("event")}>Evento</button>
               <button className={eventTab === "organization" ? "active" : ""} onClick={() => setEventTab("organization")}>Organización</button>
               <button className={eventTab === "payments" ? "active" : ""} onClick={() => setEventTab("payments")}>Pagos</button>
-              <button className={eventTab === "ranking" ? "active" : ""} onClick={() => setEventTab("ranking")}>Ranking</button>
             </div>}
 
             {activeEventTab === "event" && (
@@ -2593,7 +3265,15 @@ function EventsPage(props) {
                 <div className="block-head">
                   <h3><Swords size={16} /> Partidos</h3>
                 </div>
+                {fixtureSaveState !== "idle" && (
+                  <div className={`fixture-save-state ${fixtureSaveState}`}>
+                    {fixtureSaveState === "saving" && "Guardando configuración de partidos..."}
+                    {fixtureSaveState === "saved" && "Configuración de partidos guardada."}
+                    {fixtureSaveState === "error" && "No se pudo guardar la configuración de partidos."}
+                  </div>
+                )}
                 <TournamentSetupPanel
+                  eventId={selectedEventId}
                   selectedEvent={selectedEvent}
                   pairs={pairs}
                   registrations={registrations}
@@ -2602,6 +3282,10 @@ function EventsPage(props) {
                   setFixtureForm={setFixtureForm}
                   fixtureTiming={fixtureTiming}
                   configuredCourts={configuredCourts}
+                  loading={loading}
+                  onGenerateFixture={submitGenerateFixture}
+                  onGenerateBracket={submitGenerateBracket}
+                  onChange={run}
                 />
               </div>
             </div>
@@ -2614,33 +3298,6 @@ function EventsPage(props) {
                   <h3><Clipboard size={16} /> WhatsApp</h3>
                   <textarea className="whatsapp" value={whatsapp} readOnly />
                 </div>
-              </div>
-            )}
-
-            {activeEventTab === "ranking" && (
-              <div className="ranking-section">
-                <div className="ranking-admin-grid">
-                  <RankingConfigPanel
-                    config={rankingConfigForm}
-                    setConfig={setRankingConfigForm}
-                    onSave={submitRankingConfig}
-                  />
-                  <RankingBlock ranking={ranking} standings={standings} />
-                </div>
-                <DynamicFourPairFinals
-                  matches={matches}
-                  pairs={pairs}
-                  standings={standings}
-                  eventId={selectedEventId}
-                  fixtureForm={fixtureForm}
-                  onChange={run}
-                />
-                <PostEventSummary
-                  event={selectedEvent}
-                  standings={standings}
-                  matches={matches}
-                  pairs={pairs}
-                />
               </div>
             )}
 
@@ -2698,7 +3355,48 @@ function OperationsStatus({ pairs, payments, registrations, matches }) {
   );
 }
 
-function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matches, fixtureForm, setFixtureForm, fixtureTiming, configuredCourts }) {
+function fixtureFormatLabel(format) {
+  const labels = {
+    groups: "Grupos automaticos",
+    manual_groups: "Manual por grupos",
+    americano_inteligente: "Americano inteligente",
+    round_robin: "Todos contra todos",
+    groups_finals: "Grupos + finales",
+    timed_battles: "Batallas por nivel",
+    bracket: "Eliminacion directa",
+  };
+  return labels[format] || "Fixture configurado";
+}
+
+function oppositeCourtPreference(value) {
+  if (value === "odd") return "even";
+  if (value === "even") return "odd";
+  return "random";
+}
+
+function courtPreferenceLabel(value) {
+  if (value === "odd") return "Canchas impares";
+  if (value === "even") return "Canchas pares";
+  return "Random";
+}
+
+function TournamentSetupPanel({
+  eventId,
+  selectedEvent,
+  pairs,
+  registrations = [],
+  matches,
+  fixtureForm,
+  setFixtureForm,
+  fixtureTiming,
+  configuredCourts,
+  loading,
+  onChange,
+}) {
+  const [userPresets, setUserPresets] = useState(() => loadFixturePresets());
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+
   const categories = matchCategoryPlans(pairs);
   const scheduledRows = scheduledMatchRows(matches, pairs).filter((row) => row.time || row.turn);
   const scheduledStartMinutes = scheduledRows.map((row) => minutesFromSlot(row.time || row.turn)).filter((minutes) => minutes !== 9999);
@@ -2706,7 +3404,11 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
   const scheduledStart = scheduledStartMinutes.length ? Math.min(...scheduledStartMinutes) : null;
   const scheduledEnd = scheduledEndMinutes.length ? Math.max(...scheduledEndMinutes) : null;
   const scheduledCourts = [...new Set(scheduledRows.map((row) => row.court).filter(Boolean))];
-  const displayedStart = scheduledStart !== null && Number.isFinite(scheduledStart) ? minutesToTime(scheduledStart) : (fixtureForm.start_time || fixtureTiming.fixtureStart || "");
+  const configuredCourtNames = fixtureForm.courts?.trim()
+    ? parseCourtList(fixtureForm.courts)
+    : Array.from({ length: Math.max(1, Number(fixtureForm.court_count || 1)) }, (_, index) => String(index + 1));
+  const displayedCourtInput = configuredCourtNames.join(", ");
+  const displayedStart = scheduledStart !== null && Number.isFinite(scheduledStart) ? minutesToTime(scheduledStart) : (fixtureTiming.fixtureStart || fixtureForm.start_time || "");
   const displayedEnd = scheduledEnd ? minutesToTime(scheduledEnd) : (fixtureTiming.eventEnd || "");
   const effectiveMinutes = Number(fixtureForm.set_minutes || 20);
   const availableTurns = Math.max(1, Math.floor(Number(fixtureTiming.rentalMinutes || 0) / Math.max(1, effectiveMinutes)));
@@ -2716,12 +3418,70 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
   const guaranteedMatches = Math.ceil((planningPairs * Number(fixtureForm.guaranteed_matches || 1)) / 2);
   const finalMatches = Number(fixtureForm.include_finals || 0) ? Math.max(0, categories.length * 2) : 0;
   const totalMatchesToPlan = guaranteedMatches + finalMatches;
-  const recommendedCourts = Math.max(1, Math.ceil(totalMatchesToPlan / availableTurns));
-  const courtDelta = Math.max(0, recommendedCourts - Number(configuredCourts || 0));
+  const maxUsefulAmericanoCourts = Math.max(1, Math.floor(planningPairs / 2));
+  const rawRecommendedCourts = Math.max(1, Math.ceil(totalMatchesToPlan / availableTurns));
   const format = fixtureForm.mode || "manual_groups";
+  const recommendedCourts = format === "americano_inteligente"
+    ? Math.min(rawRecommendedCourts, maxUsefulAmericanoCourts)
+    : rawRecommendedCourts;
+  const courtDelta = Math.max(0, recommendedCourts - Number(configuredCourts || 0));
 
   function update(patch) {
     setFixtureForm({ ...fixtureForm, ...patch });
+  }
+
+  function updateCategoryCourtPreference(category, preference) {
+    const nextPreferences = {
+      ...(fixtureForm.category_court_preferences || {}),
+      [category]: preference,
+    };
+    if (categories.length === 2) {
+      const otherCategory = categories.find((item) => item.category !== category)?.category;
+      if (otherCategory) nextPreferences[otherCategory] = preference === "random" ? "random" : oppositeCourtPreference(preference);
+    }
+    update({ category_court_preferences: nextPreferences });
+  }
+
+  function useRecommendedCourts() {
+    const nextCourts = Array.from({ length: Math.max(1, recommendedCourts) }, (_, index) => String(index + 1));
+    update({ courts: nextCourts.join(", "), court_count: nextCourts.length, planner_courts: nextCourts.join(", ") });
+  }
+
+  function applyPreset(preset) {
+    const patch = { ...preset.config };
+    if (patch.courts) patch.court_count = parseCourtList(patch.courts).length;
+    update(patch);
+  }
+
+  function handleSavePreset() {
+    if (!presetName.trim()) return;
+    const preset = {
+      id: `custom_${Date.now()}`,
+      name: presetName.trim(),
+      builtin: false,
+      config: {
+        mode: fixtureForm.mode,
+        set_minutes: fixtureForm.set_minutes,
+        warmup_minutes: fixtureForm.warmup_minutes,
+        group_size: fixtureForm.group_size,
+        guaranteed_matches: fixtureForm.guaranteed_matches,
+        balance_mode: fixtureForm.balance_mode,
+        courts: fixtureForm.courts,
+        court_count: fixtureForm.court_count,
+        category_court_preferences: fixtureForm.category_court_preferences || {},
+      },
+    };
+    const updated = [...userPresets, preset];
+    setUserPresets(updated);
+    persistFixturePresets(updated);
+    setPresetName("");
+    setSavingPreset(false);
+  }
+
+  function handleDeletePreset(id) {
+    const updated = userPresets.filter((p) => p.id !== id);
+    setUserPresets(updated);
+    persistFixturePresets(updated);
   }
 
   return (
@@ -2754,10 +3514,40 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         </article>
       </div>
 
+      <div className="fixture-preset-bar">
+        <span className="preset-bar-label">Formatos guardados</span>
+        <div className="preset-list">
+          {[...BUILTIN_PRESETS, ...userPresets].map((preset) => (
+            <span key={preset.id} className={`preset-chip${preset.builtin ? "" : " preset-chip-custom"}`}>
+              <button onClick={() => applyPreset(preset)}>{preset.name}</button>
+              {!preset.builtin && (
+                <button className="preset-delete" onClick={() => handleDeletePreset(preset.id)} aria-label="Eliminar">×</button>
+              )}
+            </span>
+          ))}
+          {savingPreset ? (
+            <span className="preset-save-form">
+              <input
+                autoFocus
+                placeholder="Nombre del formato"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSavePreset(); if (e.key === "Escape") { setSavingPreset(false); setPresetName(""); } }}
+              />
+              <button onClick={handleSavePreset} disabled={!presetName.trim()}>Guardar</button>
+              <button className="preset-cancel" onClick={() => { setSavingPreset(false); setPresetName(""); }}>Cancelar</button>
+            </span>
+          ) : (
+            <button className="preset-add" onClick={() => setSavingPreset(true)}>+ Guardar configuración actual</button>
+          )}
+        </div>
+      </div>
+
       <div className="tournament-setup-grid">
         <label className="form-field">
           <span>Formato</span>
           <select value={format} onChange={(event) => update({ mode: event.target.value })}>
+            <option value="groups">Grupos automáticos</option>
             <option value="manual_groups">Manual por grupos</option>
             <option value="americano_inteligente">Americano inteligente</option>
             <option value="round_robin">Todos contra todos</option>
@@ -2789,7 +3579,7 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         </label>
         <label className="form-field">
           <span>Canchas</span>
-          <input value={fixtureForm.courts} onChange={(event) => {
+          <input value={displayedCourtInput} onChange={(event) => {
             const courts = parseCourtList(event.target.value);
             update({ courts: event.target.value, court_count: courts.length, planner_courts: courts.join(", ") });
           }} />
@@ -2816,51 +3606,243 @@ function TournamentSetupPanel({ selectedEvent, pairs, registrations = [], matche
         {categories.map((category) => {
           const minimumTurns = category.courtsPerRound ? category.roundCount : 0;
           const capacityOk = !minimumTurns || availableTurns >= minimumTurns;
+          const courtPreference = fixtureForm.category_court_preferences?.[category.category] || "random";
           return (
             <article className={capacityOk ? "ok" : "warning"} key={category.category}>
-              <strong>{category.category}</strong>
+              <div className="setup-category-title">
+                <strong>{category.category}</strong>
+                <label>
+                  <span>Canchas</span>
+                  <select value={courtPreference} onChange={(event) => updateCategoryCourtPreference(category.category, event.target.value)}>
+                    <option value="random">Random</option>
+                    <option value="odd">Impares</option>
+                    <option value="even">Pares</option>
+                  </select>
+                </label>
+              </div>
               <span>{category.pairCount} parejas · {category.totalMatches} cruces</span>
-              <small>{category.roundCount} rondas · {category.courtsPerRound} canchas simultáneas · nivel {pairLevelLabel(category.minLevel)}-{pairLevelLabel(category.maxLevel)}</small>
+              <small>{category.roundCount} rondas · {category.courtsPerRound} canchas simultáneas · {courtPreferenceLabel(courtPreference)} · nivel {pairLevelLabel(category.minLevel)}-{pairLevelLabel(category.maxLevel)}</small>
             </article>
           );
         })}
       </div>
 
-      {format === "americano_inteligente" && (
-        <AmericanoInteligentePanel
-          pairs={pairs}
-          registrations={registrations}
-          fixtureForm={fixtureForm}
-          fixtureTiming={fixtureTiming}
-          configuredCourts={configuredCourts}
-        />
-      )}
+      <div className="fixture-action-bar">
+        <div>
+          <strong>Acción del formato</strong>
+          <span>Revisa la simulación y guarda esos cruces como partidos.</span>
+        </div>
+        {courtDelta > 0 && (
+          <button type="button" className="secondary-action" onClick={useRecommendedCourts}>
+            Usar {recommendedCourts} canchas
+          </button>
+        )}
+      </div>
+
+      <FixtureBuilderPanel
+        eventId={eventId}
+        pairs={pairs}
+        matches={matches}
+        fixtureForm={fixtureForm}
+        fixtureTiming={fixtureTiming}
+        configuredCourts={configuredCourts}
+        loading={loading}
+        onChange={onChange}
+      />
     </section>
   );
 }
 
-function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configuredCourts }) {
+function validateSwap(rounds, srcRoundIdx, srcMatchIdx, srcSide, dstRoundIdx, dstMatchIdx, dstSide) {
+  if (srcRoundIdx === dstRoundIdx && srcMatchIdx === dstMatchIdx) return { valid: true };
+  const srcMatch = rounds[srcRoundIdx]?.matches[srcMatchIdx];
+  const dstMatch = rounds[dstRoundIdx]?.matches[dstMatchIdx];
+  if (!srcMatch || !dstMatch) return { valid: false, reason: "Movimiento inválido" };
+  const srcPair = srcMatch[srcSide];
+  const dstPair = dstMatch[dstSide];
+  const srcOtherPair = srcMatch[srcSide === "pair_one" ? "pair_two" : "pair_one"];
+  const dstOtherPair = dstMatch[dstSide === "pair_one" ? "pair_two" : "pair_one"];
+  if (dstPair.category !== srcOtherPair.category) {
+    return { valid: false, reason: `Categorías distintas: ${dstPair.category} ≠ ${srcOtherPair.category}` };
+  }
+  if (srcPair.category !== dstOtherPair.category) {
+    return { valid: false, reason: `Categorías distintas: ${srcPair.category} ≠ ${dstOtherPair.category}` };
+  }
+  const existingKeys = new Set();
+  rounds.forEach((round, rIdx) => {
+    round.matches.forEach((match, mIdx) => {
+      if ((rIdx === srcRoundIdx && mIdx === srcMatchIdx) || (rIdx === dstRoundIdx && mIdx === dstMatchIdx)) return;
+      existingKeys.add(americanoPairMatchKey(match.pair_one, match.pair_two));
+    });
+  });
+  const newSrcKey = americanoPairMatchKey(dstPair, srcOtherPair);
+  const newDstKey = americanoPairMatchKey(srcPair, dstOtherPair);
+  if (existingKeys.has(newSrcKey)) {
+    return { valid: false, reason: `${dstPair.shortName} ya enfrenta a ${srcOtherPair.shortName} en otra ronda` };
+  }
+  if (existingKeys.has(newDstKey)) {
+    return { valid: false, reason: `${srcPair.shortName} ya enfrenta a ${dstOtherPair.shortName} en otra ronda` };
+  }
+  if (newSrcKey === newDstKey) {
+    return { valid: false, reason: "El intercambio crearía un partido duplicado" };
+  }
+  return { valid: true };
+}
+
+function FixtureBuilderPanel({ eventId, pairs, matches, fixtureForm, fixtureTiming, configuredCourts, loading, onChange }) {
   const fixedPairs = useMemo(() => americanoFixedPairs(pairs), [pairs]);
+  const pairById = useMemo(() => new Map(fixedPairs.map((p) => [p.pairId, p])), [fixedPairs]);
   const courts = useMemo(() => parseCourtList(fixtureForm.courts).slice(0, Math.max(1, Number(configuredCourts || fixtureForm.court_count || 1))), [fixtureForm.courts, fixtureForm.court_count, configuredCourts]);
+  const formatLabel = fixtureFormatLabel(fixtureForm.mode);
   const preview = useMemo(() => generateFixedPairAmericanoFixture({
     pairs: fixedPairs,
     startTime: fixtureTiming.fixtureStart || fixtureForm.start_time,
     endTime: fixtureTiming.eventEnd,
     matchMinutes: Number(fixtureForm.set_minutes || 20),
     courts,
-  }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts]);
+    categoryCourtPreferences: fixtureForm.category_court_preferences || {},
+  }), [fixedPairs, fixtureTiming.fixtureStart, fixtureTiming.eventEnd, fixtureForm.start_time, fixtureForm.set_minutes, courts, fixtureForm.category_court_preferences]);
+
+  const savedRounds = useMemo(() => matchesToEditableRounds(matches, pairById), [matches, pairById]);
+
+  const [editableRounds, setEditableRounds] = useState(() => savedRounds || preview.rounds);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const dragRef = useRef(null);
+  const swapErrorRef = useRef(null);
+  const configKeyRef = useRef(null);
+  const matchesKeyRef = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
+  const [swapError, setSwapError] = useState(null);
+
+  const configKey = [
+    fixedPairs.map((p) => p.id).sort((a, b) => a - b).join(","),
+    courts.join(","),
+    fixtureForm.set_minutes,
+    fixtureTiming.fixtureStart || fixtureForm.start_time,
+    fixtureTiming.eventEnd,
+    JSON.stringify(fixtureForm.category_court_preferences || {}),
+  ].join("|");
+
+  const matchesKey = matches.map((m) => m.id).join(",");
+
+  useEffect(() => {
+    const prevConfigKey = configKeyRef.current;
+    const prevMatchesKey = matchesKeyRef.current;
+    configKeyRef.current = configKey;
+    matchesKeyRef.current = matchesKey;
+
+    if (savedRounds) {
+      // Stored matches are the source of truth for reprinting an existing fixture.
+      setEditableRounds(savedRounds);
+    } else if (prevConfigKey !== null && prevConfigKey !== configKey) {
+      // Config changed intentionally and there is no saved fixture yet.
+      setEditableRounds(preview.rounds);
+    } else if (prevMatchesKey !== null && prevMatchesKey !== matchesKey) {
+      setEditableRounds(preview.rounds);
+    }
+  }, [configKey, matchesKey, preview, savedRounds]);
+
+  const hasManualEdits = useMemo(() => editableRounds.some((r) => r.matches.some((m) => m.locked)), [editableRounds]);
+  const allMatches = useMemo(() => editableRounds.flatMap((r) => r.matches), [editableRounds]);
+  const liveStats = useMemo(() => computeRoundStats(editableRounds), [editableRounds]);
+  const duplicateMatchKeys = useMemo(() => {
+    const counts = new Map();
+    editableRounds.forEach((round) => {
+      round.matches.forEach((match) => {
+        const key = americanoPairMatchKey(match.pair_one, match.pair_two);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+    });
+    return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
+  }, [editableRounds]);
   const printableCategories = useMemo(() => (
-    [...new Set(preview.matches.flatMap((match) => [match.pair_one.category, match.pair_two.category]).filter(Boolean))]
+    [...new Set(allMatches.flatMap((match) => [match.pair_one.category, match.pair_two.category]).filter(Boolean))]
       .sort((left, right) => String(left).localeCompare(String(right), undefined, { numeric: true }))
-  ), [preview.matches]);
+  ), [allMatches]);
+  const canSavePreview = Boolean(eventId) && allMatches.length > 0 && !loading && liveStats.restPerRound === 0 && duplicateMatchKeys.size === 0;
+
+  function showSwapError(message) {
+    setSwapError(message);
+    if (swapErrorRef.current) clearTimeout(swapErrorRef.current);
+    swapErrorRef.current = setTimeout(() => setSwapError(null), 3500);
+  }
+
+  function saveAmericanoFixture() {
+    if (!canSavePreview) return;
+    const payload = allMatches.map((match) => ({
+      pair_one_id: Number(match.pair_one.pairId),
+      pair_two_id: Number(match.pair_two.pairId),
+      court: match.court,
+      round_name: `${match.pair_one.category || "Categoria"} - ${formatLabel} - Ronda ${match.round} - ${match.start_time}-${match.end_time}`,
+    }));
+    onChange(() => api.createMatchesBulk(eventId, payload, true));
+  }
+
+  function handleDragStart(e, roundIdx, matchIdx, side) {
+    dragRef.current = { roundIdx, matchIdx, side };
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDragOver(e, roundIdx, matchIdx, side) {
+    e.preventDefault();
+    const src = dragRef.current;
+    if (!src) return;
+    const isSelf = src.roundIdx === roundIdx && src.matchIdx === matchIdx && src.side === side;
+    const valid = isSelf || validateSwap(editableRounds, src.roundIdx, src.matchIdx, src.side, roundIdx, matchIdx, side).valid;
+    e.dataTransfer.dropEffect = valid ? "move" : "none";
+    const current = dragOver;
+    if (current?.roundIdx !== roundIdx || current?.matchIdx !== matchIdx || current?.side !== side || current?.valid !== valid) {
+      setDragOver({ roundIdx, matchIdx, side, valid });
+    }
+  }
+
+  function handleDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(null);
+  }
+
+  function handleDrop(e, dstRoundIdx, dstMatchIdx, dstSide) {
+    e.preventDefault();
+    setDragOver(null);
+    const src = dragRef.current;
+    if (!src) return;
+    const { roundIdx: srcRoundIdx, matchIdx: srcMatchIdx, side: srcSide } = src;
+    dragRef.current = null;
+    if (srcRoundIdx === dstRoundIdx && srcMatchIdx === dstMatchIdx && srcSide === dstSide) return;
+    const check = validateSwap(editableRounds, srcRoundIdx, srcMatchIdx, srcSide, dstRoundIdx, dstMatchIdx, dstSide);
+    if (!check.valid) {
+      showSwapError(check.reason);
+      return;
+    }
+    setEditableRounds((prev) => {
+      const next = prev.map((r) => ({ ...r, matches: r.matches.map((m) => ({ ...m })) }));
+      const srcMatch = next[srcRoundIdx].matches[srcMatchIdx];
+      const dstMatch = next[dstRoundIdx].matches[dstMatchIdx];
+      const srcPair = srcMatch[srcSide];
+      const dstPair = dstMatch[dstSide];
+      srcMatch[srcSide] = dstPair;
+      dstMatch[dstSide] = srcPair;
+      srcMatch.locked = true;
+      dstMatch.locked = true;
+      return next;
+    });
+  }
+
+  function handleDragEnd() {
+    setDragOver(null);
+    dragRef.current = null;
+  }
+
+  function resetEdits() {
+    setEditableRounds(preview.rounds);
+  }
 
   return (
     <section className="americano-panel">
       <div className="americano-head">
         <div>
-          <span>Motor Americano Inteligente</span>
+          <span>Constructor de fixture</span>
           <strong>{preview.summary}</strong>
-          <p>Duplas fijas durante todo el evento, descansos rotativos y cruces diversos entre parejas.</p>
+          <p>{formatLabel}: arrastra las parejas para ajustar el fixture antes de guardar.</p>
         </div>
         <div className={preview.warnings.length ? "setup-pill warning" : "setup-pill ok"}>
           {preview.warnings.length ? `${preview.warnings.length} ajuste${preview.warnings.length === 1 ? "" : "s"}` : "Listo para simular"}
@@ -2868,24 +3850,24 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
       </div>
 
       <div className="americano-metrics">
-        <article>
+        <article className={liveStats.restPerRound > 0 ? "warning" : undefined}>
           <span>Parejas</span>
           <strong>{fixedPairs.length}</strong>
-          <small>{preview.restPerRound} pareja{preview.restPerRound === 1 ? "" : "s"} descansan por ronda</small>
+          <small>{liveStats.restPerRound === 0 ? "Todas juegan por ronda" : `${liveStats.restPerRound} pareja${liveStats.restPerRound === 1 ? "" : "s"} descansan · ajusta canchas`}</small>
         </article>
         <article>
           <span>Rondas útiles</span>
-          <strong>{preview.rounds.length}</strong>
+          <strong>{editableRounds.length}</strong>
           <small>{preview.timeWindow}</small>
         </article>
         <article>
           <span>Partidos</span>
-          <strong>{preview.matches.length}</strong>
-          <small>{preview.matchesPerPairRange}</small>
+          <strong>{allMatches.length}</strong>
+          <small>{liveStats.matchesPerPairRange}</small>
         </article>
         <article>
           <span>Diversidad</span>
-          <strong>{preview.repeatSummary}</strong>
+          <strong>{liveStats.repeatSummary}</strong>
           <small>Cruces repetidos entre duplas</small>
         </article>
       </div>
@@ -2896,15 +3878,29 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
         </div>
       )}
 
+      {swapError && (
+        <div className="americano-swap-error">
+          {swapError}
+        </div>
+      )}
+
       {printableCategories.length > 0 && (
         <div className="americano-print-actions">
           <span>Imprimir programación</span>
+          <button type="button" disabled={!canSavePreview} onClick={saveAmericanoFixture}>
+            <Save size={16} /> Guardar partidos
+          </button>
+          {hasManualEdits && (
+            <button type="button" className="secondary-action" onClick={resetEdits}>
+              Resetear cambios
+            </button>
+          )}
           {printableCategories.map((category) => (
             <button
               type="button"
               className="secondary-action"
               key={`print-${category}`}
-              onClick={() => printAmericanoCategory(category, preview)}
+              onClick={() => printAmericanoCategory(category, { ...preview, rounds: editableRounds, matches: allMatches })}
             >
               Imprimir {category}
             </button>
@@ -2912,8 +3908,35 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
         </div>
       )}
 
+      {printableCategories.length > 1 && (
+        <div className="americano-cat-filter">
+          <button
+            type="button"
+            className={categoryFilter === "all" ? "active" : ""}
+            onClick={() => setCategoryFilter("all")}
+          >
+            Todas
+          </button>
+          {printableCategories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              className={categoryFilter === cat ? "active" : ""}
+              onClick={() => setCategoryFilter(cat)}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="americano-rounds">
-        {preview.rounds.length ? preview.rounds.map((round) => (
+        {editableRounds.length ? editableRounds.map((round, roundIdx) => {
+          const visibleMatches = categoryFilter === "all"
+            ? round.matches
+            : round.matches.filter((m) => m.pair_one.category === categoryFilter);
+          if (visibleMatches.length === 0) return null;
+          return (
           <article className="americano-round" key={`americano-r${round.round}`}>
             <header>
               <strong>R{round.round}</strong>
@@ -2921,22 +3944,57 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
               {round.resting.length > 0 && <small>Descansan: {round.resting.map((pair) => pair.shortName).join(", ")}</small>}
             </header>
             <div className="americano-match-grid">
-              {round.matches.map((match) => (
-                <div className="americano-match" key={`americano-r${round.round}-c${match.court}`}>
-                  <span>Cancha {match.court}</span>
-                  <AmericanoPairPill pair={match.pair_one} />
-                  <b>vs</b>
-                  <AmericanoPairPill pair={match.pair_two} />
-                </div>
-              ))}
+              {visibleMatches.map((match) => {
+                const matchIdx_real = round.matches.indexOf(match);
+                const matchKey = americanoPairMatchKey(match.pair_one, match.pair_two);
+                const isDuplicate = duplicateMatchKeys.has(matchKey);
+                const getDragOverValid = (side) => {
+                  if (!dragOver || dragOver.roundIdx !== roundIdx || dragOver.matchIdx !== matchIdx_real || dragOver.side !== side) return null;
+                  return dragOver.valid;
+                };
+                return (
+                  <div
+                    className={`americano-match${match.locked ? " americano-match--edited" : ""}${isDuplicate ? " americano-match--duplicate" : ""}`}
+                    key={`americano-r${round.round}-c${match.court}`}
+                  >
+                    <span>Cancha {match.court}{match.locked ? " ✎" : ""}</span>
+                    <DraggablePairPill
+                      pair={match.pair_one}
+                      roundIdx={roundIdx}
+                      matchIdx={matchIdx_real}
+                      side="pair_one"
+                      dragOverValid={getDragOverValid("pair_one")}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                    />
+                    <b>vs</b>
+                    <DraggablePairPill
+                      pair={match.pair_two}
+                      roundIdx={roundIdx}
+                      matchIdx={matchIdx_real}
+                      side="pair_two"
+                      dragOverValid={getDragOverValid("pair_two")}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </article>
-        )) : (
+          );
+        }) : (
           <p className="empty">Faltan al menos 2 parejas completas para generar un Americano.</p>
         )}
       </div>
 
-      {preview.pairStats.length > 0 && (
+      {liveStats.pairStats.length > 0 && (
         <div className="americano-table-wrap">
           <table className="americano-table">
             <thead>
@@ -2949,7 +4007,7 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
               </tr>
             </thead>
             <tbody>
-              {preview.pairStats.map((stat) => (
+              {liveStats.pairStats.map((stat) => (
                 <tr key={stat.id}>
                   <td>{stat.name}</td>
                   <td>{stat.category}</td>
@@ -2962,8 +4020,6 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
           </table>
         </div>
       )}
-
-      <p className="americano-note">Preview local: este formato ya respeta parejas fijas; el siguiente paso es guardar estos cruces como partidos reales.</p>
     </section>
   );
 }
@@ -2971,6 +4027,29 @@ function AmericanoInteligentePanel({ pairs, fixtureForm, fixtureTiming, configur
 function AmericanoPairPill({ pair }) {
   return (
     <div className="americano-pair-pill" style={{ "--pair-bg": pair.color }}>
+      <strong>{pair.shortName}</strong>
+      <small>{pair.category}</small>
+    </div>
+  );
+}
+
+function DraggablePairPill({ pair, roundIdx, matchIdx, side, dragOverValid, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
+  const dropClass = dragOverValid === true
+    ? " americano-pair-pill--drop-valid"
+    : dragOverValid === false
+      ? " americano-pair-pill--drop-invalid"
+      : "";
+  return (
+    <div
+      className={`americano-pair-pill americano-pair-pill--drag${dropClass}`}
+      style={{ "--pair-bg": pair.color }}
+      draggable
+      onDragStart={(e) => onDragStart(e, roundIdx, matchIdx, side)}
+      onDragOver={(e) => onDragOver(e, roundIdx, matchIdx, side)}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => onDrop(e, roundIdx, matchIdx, side)}
+      onDragEnd={onDragEnd}
+    >
       <strong>{pair.shortName}</strong>
       <small>{pair.category}</small>
     </div>
@@ -2996,29 +4075,21 @@ function printAmericanoCategory(category, preview) {
     .filter((round) => round.matches.length || round.resting.length);
   const categoryMatchCount = categoryRounds.reduce((sum, round) => sum + round.matches.length, 0);
   const maxMatchesInRound = Math.max(1, ...categoryRounds.map((round) => round.matches.length));
-  const printColumns = Math.min(5, Math.max(2, maxMatchesInRound));
-  const densityClass = categoryMatchCount > 24 ? "dense" : categoryMatchCount > 15 ? "compact" : "";
 
   const rows = categoryRounds.map((round) => `
     <section class="round">
       <header>
         <strong>R${round.round}</strong>
-        <span>${htmlEscape(round.start_time)}-${htmlEscape(round.end_time)}</span>
+        <span>${htmlEscape(round.start_time)}&ndash;${htmlEscape(round.end_time)}</span>
         ${round.resting.length ? `<small>Descansan: ${round.resting.map((pair) => htmlEscape(pair.shortName)).join(", ")}</small>` : ""}
       </header>
       <div class="matches">
         ${round.matches.map((match) => `
           <article class="match">
-            <span>Cancha ${htmlEscape(match.court)}</span>
-            <div class="score-line">
-              <div class="pair" style="background:${htmlEscape(match.pair_one.color)}">${htmlEscape(match.pair_one.shortName)}</div>
-              <i></i>
-            </div>
-            <b>vs</b>
-            <div class="score-line">
-              <div class="pair" style="background:${htmlEscape(match.pair_two.color)}">${htmlEscape(match.pair_two.shortName)}</div>
-              <i></i>
-            </div>
+            <div class="court">C${htmlEscape(String(match.court))}</div>
+            <div class="pair" style="background:${htmlEscape(match.pair_one.color)}">${htmlEscape(match.pair_one.shortName)}<i></i></div>
+            <div class="sep">vs</div>
+            <div class="pair" style="background:${htmlEscape(match.pair_two.color)}">${htmlEscape(match.pair_two.shortName)}<i></i></div>
           </article>
         `).join("")}
       </div>
@@ -3036,49 +4107,27 @@ function printAmericanoCategory(category, preview) {
       <head>
         <title>Programación ${htmlEscape(category)}</title>
         <style>
-          @page { size: A4 landscape; margin: 7mm; }
+          @page { size: A4 landscape; margin: 8mm; }
           * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-          body { --print-cols: ${printColumns}; color: #08223b; font-family: Arial, sans-serif; margin: 14px; }
-          h1 { font-size: 21px; margin: 0 0 3px; }
-          .subtitle { color: #526670; font-size: 12px; font-weight: 700; margin: 0 0 10px; }
-          .round { border: 1px solid #c7d9e4; border-radius: 7px; margin-bottom: 7px; padding: 7px; break-inside: avoid; }
-          .round header { align-items: center; border-bottom: 1px solid #d9e8f0; display: grid; gap: 8px; grid-template-columns: 42px 92px 1fr; margin-bottom: 6px; padding-bottom: 5px; }
-          .round header strong { font-size: 16px; }
-          .round header span, .round header small { color: #526670; font-size: 11px; font-weight: 800; }
-          .matches { display: grid; gap: 6px; grid-template-columns: repeat(var(--print-cols), minmax(0, 1fr)); }
-          .match { background: #f4fbff; border-left: 4px solid #13a66f; border-radius: 7px; display: grid; gap: 4px; padding: 6px; }
-          .match span { color: #0e5d8f; font-size: 10px; font-weight: 900; text-transform: uppercase; }
-          .match b { color: #526670; font-size: 10px; text-transform: uppercase; }
-          .pair { border: 1px solid rgba(8, 34, 59, 0.14); border-radius: 6px; font-size: 11px; font-weight: 800; line-height: 1.1; min-height: 30px; padding: 5px; }
-          .score-line { align-items: stretch; display: grid; gap: 5px; grid-template-columns: minmax(0, 1fr) 34px; }
-          .score-line i { background: #ffffff; border: 2px solid #08223b; border-radius: 6px; display: block; min-height: 30px; }
-          body.compact h1 { font-size: 18px; }
-          body.compact .subtitle { margin-bottom: 7px; }
-          body.compact .round { margin-bottom: 5px; padding: 5px; }
-          body.compact .round header { margin-bottom: 4px; padding-bottom: 4px; }
-          body.compact .pair { font-size: 10px; min-height: 26px; padding: 4px; }
-          body.compact .score-line { grid-template-columns: minmax(0, 1fr) 30px; }
-          body.compact .score-line i { min-height: 26px; }
-          body.dense h1 { font-size: 16px; }
-          body.dense .subtitle { font-size: 10px; margin-bottom: 5px; }
-          body.dense .round { margin-bottom: 4px; padding: 4px; }
-          body.dense .round header { grid-template-columns: 34px 78px 1fr; gap: 5px; margin-bottom: 3px; padding-bottom: 3px; }
-          body.dense .round header strong { font-size: 13px; }
-          body.dense .round header span, body.dense .round header small { font-size: 9px; }
-          body.dense .matches { gap: 4px; }
-          body.dense .match { gap: 2px; padding: 4px; }
-          body.dense .match span, body.dense .match b { font-size: 8px; }
-          body.dense .pair { font-size: 9px; min-height: 22px; padding: 3px; }
-          body.dense .score-line { gap: 3px; grid-template-columns: minmax(0, 1fr) 24px; }
-          body.dense .score-line i { border-width: 1.5px; min-height: 22px; }
-          @media print {
-            body { margin: 0; }
-          }
+          body { color: #08223b; font-family: Arial, sans-serif; margin: 0; }
+          h1 { font-size: 14px; margin: 0 0 1px; }
+          .subtitle { color: #526670; font-size: 9px; font-weight: 700; margin: 0 0 5px; }
+          .round { border: 1px solid #c7d9e4; border-radius: 5px; break-inside: avoid; margin-bottom: 4px; padding: 4px 5px; page-break-inside: avoid; }
+          .round header { align-items: center; border-bottom: 1px solid #dae8f0; display: flex; gap: 6px; margin-bottom: 3px; padding-bottom: 2px; }
+          .round header strong { font-size: 11px; min-width: 26px; }
+          .round header span, .round header small { color: #526670; font-size: 8px; font-weight: 800; }
+          .matches { display: grid; gap: 3px; grid-template-columns: repeat(${maxMatchesInRound}, minmax(0, 1fr)); }
+          .match { border-left: 3px solid #13a66f; border-radius: 3px; display: grid; gap: 1px; padding: 3px 4px; }
+          .court { color: #0e5d8f; font-size: 7px; font-weight: 900; letter-spacing: 0.02em; text-transform: uppercase; }
+          .pair { align-items: center; border-radius: 3px; display: grid; font-size: 8px; font-weight: 800; gap: 2px; grid-template-columns: 1fr 18px; line-height: 1.1; padding: 2px 3px; }
+          .pair i { background: #fff; border: 1.5px solid #08223b; border-radius: 2px; display: block; height: 18px; }
+          .sep { color: #888; font-size: 7px; font-weight: 900; text-align: center; }
+          @media print { body { margin: 0; } }
         </style>
       </head>
-      <body class="${densityClass}">
+      <body>
         <h1>Programación ${htmlEscape(category)}</h1>
-        <p class="subtitle">${htmlEscape(preview.timeWindow)} · ${categoryMatchCount} partidos</p>
+        <p class="subtitle">${htmlEscape(preview.timeWindow)} &middot; ${categoryMatchCount} partidos</p>
         ${rows || "<p>No hay partidos para esta categoría.</p>"}
       </body>
     </html>
@@ -3634,6 +4683,15 @@ function EventCategorySelect({ value, onChange }) {
 }
 
 function EventForm({ form, setForm, onSubmit, isEditing }) {
+  function updateEventType(eventType) {
+    setForm({
+      ...form,
+      event_type: eventType,
+      categories: defaultCategoriesForEventType(eventType),
+      category_configs: [],
+    });
+  }
+
   return (
     <div className="data-block">
       <h3><CalendarPlus size={16} /> {isEditing ? "Editar evento" : "Crear evento"}</h3>
@@ -3663,6 +4721,13 @@ function EventForm({ form, setForm, onSubmit, isEditing }) {
           <span>Cupos</span>
           <input type="number" placeholder="56" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
           <small>Total máximo de jugadores/inscritos.</small>
+        </label>
+        <label className="form-field">
+          <span>Tipo de evento</span>
+          <select value={form.event_type || "hombres"} onChange={(e) => updateEventType(e.target.value)}>
+            {eventTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <small>Define qué categorías verá el jugador al registrarse.</small>
         </label>
         <label className="form-field">
           <span>Categorías</span>
@@ -4043,17 +5108,12 @@ function UserAdminRow({ user, authUser, roleLabels, onUpdateUser, onResetPasswor
   );
 }
 
-function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, notice, setNotice, onSubmit, loading, pairs, goSignup, goLogin }) {
+function PublicRegistration({ events, selectedEventId, setSelectedEventId, selectedEvent, authUser, members, form, setForm, success, setSuccess, notice, setNotice, onSubmit, loading, pairs, goSignup, goLogin, goProfile }) {
   const [partnerMode, setPartnerMode] = useState("searching");
-  const eventCategories = [
-    ...new Set([
-      ...(selectedEvent?.category_configs || []).map((config) => config.category).filter(Boolean),
-      ...(selectedEvent?.categories || "").split("/").map((category) => category.trim()).filter(Boolean),
-    ]),
-  ];
-  const options = eventCategories.length ? eventCategories : categoryOptions[form.gender];
+  const [activeStep, setActiveStep] = useState(selectedEventId ? 2 : 1);
+  const options = eventCategoriesForEvent(selectedEvent);
   const hasPartner = partnerMode === "complete";
-  const selectedCategory = form.category || options[0] || "";
+  const selectedCategory = options.includes(form.category) ? form.category : options[0] || "";
   const availableMembers = members.filter((member) => member.id !== authUser?.id);
   const selectedPartnerMember = availableMembers.find((member) => String(member.id) === String(form.partner_member_id));
   const selectedEventPairs = pairs.filter((pair) => String(pair.event_id) === String(selectedEventId));
@@ -4074,6 +5134,15 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [notice, setNotice]);
 
+  useEffect(() => {
+    if (!selectedEventId || !options.length || options.includes(form.category)) return;
+    setForm((current) => ({ ...current, category: options[0] }));
+  }, [selectedEventId, selectedEvent?.event_type, selectedEvent?.categories]);
+
+  useEffect(() => {
+    if (!selectedEventId && activeStep > 1) setActiveStep(1);
+  }, [selectedEventId, activeStep]);
+
   function applyPartnerMember(memberId) {
     const member = availableMembers.find((item) => String(item.id) === String(memberId));
     setForm({
@@ -4087,8 +5156,11 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
   }
 
   function selectEvent(eventId) {
+    const nextEvent = events.find((event) => String(event.id) === String(eventId));
+    const nextOptions = eventCategoriesForEvent(nextEvent);
     setSelectedEventId(String(eventId));
-    setForm({ ...form, category: "" });
+    setForm({ ...form, category: nextOptions[0] || "" });
+    setActiveStep(2);
     setSuccess(null);
   }
 
@@ -4130,14 +5202,29 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
       <div className="registration-wizard">
         <section className="registration-hero-card">
           <div>
-            <p className="eyebrow">Inscripciones AMAR</p>
-            <h2>Elige tu evento y deja tu dupla lista</h2>
-            <p>Un flujo pensado para jugadores: selecciona fecha, define tu categoría, elige si vienes con partner y confirma.</p>
+            <p className="eyebrow">Inscripción jugador</p>
+            <h2>Anótate al evento en menos de un minuto</h2>
+            <p>Elige el torneo, confirma tu categoría y decide si vienes con partner o quieres que la organización te complete.</p>
           </div>
-          <div className="registration-progress" aria-label="Pasos de inscripción">
-            <span className={registrationStep >= 1 ? "active" : ""}><UserPlus size={16} /> Cuenta</span>
-            <span className={registrationStep >= 2 ? "active" : ""}><CalendarPlus size={16} /> Evento</span>
-            <span className={registrationStep >= 3 ? "active" : ""}><Check size={16} /> Confirmar</span>
+          <div className="registration-hero-side">
+            {authUser?.role === "jugador" ? (
+              <div className="registration-player-chip">
+                <span>Entrando como</span>
+                <strong>{authUser.name}</strong>
+                <small>{authUser.category || "Sin categoría"} · {authUser.preferred_side || "lado indiferente"}</small>
+              </div>
+            ) : (
+              <div className="registration-player-chip">
+                <span>Primer paso</span>
+                <strong>Crea o entra a tu perfil</strong>
+                <small>Así el evento puede recordar tus partidos, ranking y avisos.</small>
+              </div>
+            )}
+            <div className="registration-progress" aria-label="Pasos de inscripción">
+              <span className={`${registrationStep >= 1 ? "active" : ""} ${activeStep === 1 ? "current" : ""}`}><UserPlus size={16} /> Cuenta</span>
+              <span className={`${registrationStep >= 2 ? "active" : ""} ${activeStep === 2 ? "current" : ""}`}><CalendarPlus size={16} /> Evento</span>
+              <span className={`${registrationStep >= 3 ? "active" : ""} ${activeStep === 3 ? "current" : ""}`}><Check size={16} /> Confirmar</span>
+            </div>
           </div>
         </section>
 
@@ -4148,8 +5235,13 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
             </div>
             <div>
               <p className="eyebrow">Cuenta jugador requerida</p>
-              <h2>Antes de inscribirte necesitamos reconocer tu perfil</h2>
-              <p>Así evitamos duplicados, guardamos tu progreso del evento y hacemos que tus resultados aparezcan en tu perfil.</p>
+              <h2>Necesitamos saber quién eres antes de inscribirte</h2>
+              <p>Tu perfil evita duplicados, te muestra el avance del evento y deja tus resultados asociados a tu cuenta.</p>
+            </div>
+            <div className="registration-gate-benefits" aria-label="Beneficios del perfil jugador">
+              <span><Check size={16} /> Inscripción más rápida en próximos eventos</span>
+              <span><Check size={16} /> Ranking y partidos visibles desde tu perfil</span>
+              <span><Check size={16} /> Dispositivo recordado si lo autorizas al entrar</span>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={goSignup}>Crear perfil jugador</button>
@@ -4166,11 +5258,12 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                     {success.playerName}
                     {success.partnerName ? ` y ${success.partnerName}` : ""} {success.waitlisted ? "quedaron en lista de espera para" : "quedaron inscritos en"} {success.eventName}.
                   </span>
-                  <button type="button" className="secondary-action" onClick={() => setSuccess(null)}>Hacer otra inscripción</button>
+                  <small>Te llevaremos a tu perfil para ver el estado de tu dupla.</small>
+                  <button type="button" onClick={goProfile}>Ir a mi perfil</button>
                 </div>
               )}
 
-              <section className="registration-step-card">
+              {!success && <section className={`registration-step-card wizard-step ${activeStep === 1 ? "active" : ""}`}>
                 <div className="step-card-head">
                   <span>1</span>
                   <div>
@@ -4194,14 +5287,20 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                         <strong>{event.name}</strong>
                         <small>{event.date} · {event.schedule}</small>
                         <em>{event.place}</em>
+                        <em>{eventTypeLabels[event.event_type] || "Solo hombres"}</em>
                         <b>{event.categories}</b>
                       </button>
                     );
                   })}
                 </div>
-              </section>
+                <div className="mobile-step-actions">
+                  <button type="button" onClick={() => setActiveStep(2)} disabled={!selectedEventId}>
+                    Continuar
+                  </button>
+                </div>
+              </section>}
 
-              <section className={`registration-step-card ${!selectedEventId ? "disabled" : ""}`}>
+              {!success && <section className={`registration-step-card wizard-step ${!selectedEventId ? "disabled" : ""} ${activeStep === 2 ? "active" : ""}`}>
                 <div className="step-card-head">
                   <span>2</span>
                   <div>
@@ -4215,6 +5314,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                     <select value={selectedCategory} onChange={(e) => setForm({ ...form, category: e.target.value })} disabled={!selectedEventId}>
                       {options.map((category) => <option key={category} value={category}>{category}</option>)}
                     </select>
+                    {selectedEvent && <small>{eventTypeLabels[selectedEvent.event_type] || "Solo hombres"}</small>}
                   </label>
                   <label className="form-field">
                     <span>Lado preferido</span>
@@ -4266,9 +5366,17 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                     )}
                   </div>
                 )}
-              </section>
+                <div className="mobile-step-actions split">
+                  <button type="button" className="secondary-action" onClick={() => setActiveStep(1)}>
+                    Atrás
+                  </button>
+                  <button type="button" onClick={() => setActiveStep(3)} disabled={!selectedEventId || (hasPartner && !form.partner_member_id)}>
+                    Continuar
+                  </button>
+                </div>
+              </section>}
 
-              <section className={`registration-step-card ${!selectedEventId ? "disabled" : ""}`}>
+              {!success && <section className={`registration-step-card wizard-step ${!selectedEventId ? "disabled" : ""} ${activeStep === 3 ? "active" : ""}`}>
                 <div className="step-card-head">
                   <span>3</span>
                   <div>
@@ -4305,10 +5413,15 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                 <button className="registration-submit" disabled={loading || !canSubmitRegistration}>
                   <UserPlus size={16} /> {loading ? "Registrando..." : isWaitlist ? "Entrar a lista de espera" : "Confirmar inscripción"}
                 </button>
-              </section>
+                <div className="mobile-step-actions">
+                  <button type="button" className="secondary-action" onClick={() => setActiveStep(2)}>
+                    Atrás
+                  </button>
+                </div>
+              </section>}
             </main>
 
-            <aside className="registration-live-summary">
+            {!success && <aside className="registration-live-summary">
               <div className="summary-player-card">
                 <span>Jugador</span>
                 <strong>{authUser?.name || form.name}</strong>
@@ -4348,7 +5461,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
                   )) : <p className="muted">Sin inscritos todavia</p>}
                 </div>
               </section>
-            </aside>
+            </aside>}
           </form>
         )}
       </div>
@@ -4357,7 +5470,7 @@ function PublicRegistration({ events, selectedEventId, setSelectedEventId, selec
 }
 
 function CategorySelect({ value, onChange }) {
-  const allCategories = [...categoryOptions.hombre, ...categoryOptions.mujer];
+  const allCategories = allPadelCategories;
   const hasCustomValue = value && !allCategories.includes(value);
 
   return (
@@ -4365,10 +5478,13 @@ function CategorySelect({ value, onChange }) {
       <option value="">Categoría</option>
       {hasCustomValue && <option value={value}>{value}</option>}
       <optgroup label="Hombres">
-        {categoryOptions.hombre.map((category) => <option key={`h-${category}`} value={category}>{category}</option>)}
+        {categoryOptions.hombres.map((category) => <option key={`h-${category}`} value={category}>{category}</option>)}
       </optgroup>
       <optgroup label="Mujeres">
-        {categoryOptions.mujer.map((category) => <option key={`f-${category}`} value={category}>{category}</option>)}
+        {categoryOptions.mujeres.map((category) => <option key={`f-${category}`} value={category}>{category}</option>)}
+      </optgroup>
+      <optgroup label="Mixto">
+        {categoryOptions.mixto.map((category) => <option key={`m-${category}`} value={category}>{category}</option>)}
       </optgroup>
     </select>
   );
@@ -4752,7 +5868,425 @@ function PaymentBlock({ payments, pairs, players, eventId, onChange }) {
   );
 }
 
-function RankingBlock({ ranking, standings }) {
+function RankingFormulaPanel({ config }) {
+  const [expanded, setExpanded] = useState(false);
+  const mergedConfig = { ...defaultRankingConfig, ...(config || {}) };
+  const tiebreakers = mergedConfig.tiebreakers?.length ? mergedConfig.tiebreakers : defaultRankingConfig.tiebreakers;
+  const labels = Object.fromEntries(rankingTiebreakerOptions.map((option) => [option.value, option.label]));
+  const shortLabel = { points: "PTS", won: "G", difference: "DIF", points_for: "PF", played: "J" };
+
+  return (
+    <article className={`ranking-formula-panel${expanded ? " formula-expanded" : ""}`}>
+      <div className="ranking-formula-main">
+        <span>Fórmula de puntos</span>
+        <strong>PTS = (G × {mergedConfig.win_points}) + (E × {mergedConfig.draw_points}) + (P × {mergedConfig.loss_points})</strong>
+        <small className="formula-detail">Cada categoría se calcula y ordena por separado.</small>
+        <small className="formula-compact">
+          Orden: {tiebreakers.map((c) => shortLabel[c] || c).join(" › ")}
+          <button className="formula-toggle" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? "▲ ocultar" : "▼ ver leyenda"}
+          </button>
+        </small>
+      </div>
+      <div className="ranking-formula-definitions formula-collapsible">
+        <span><strong>J</strong> Jugados</span>
+        <span><strong>G</strong> Ganados</span>
+        <span><strong>E</strong> Empatados = J − G − P</span>
+        <span><strong>P</strong> Perdidos</span>
+        <span><strong>PF</strong> Juegos a favor</span>
+        <span><strong>PC</strong> Juegos en contra</span>
+        <span><strong>DIF</strong> PF − PC</span>
+        <span><strong>PTS</strong> Puntos de clasificación</span>
+      </div>
+      <div className="ranking-order-formula formula-collapsible">
+        <span>Orden aplicado</span>
+        <ol>
+          {tiebreakers.map((criterion, index) => <li key={`${criterion}-${index}`}>{labels[criterion] || criterion}</li>)}
+        </ol>
+        <small>Si dos parejas siguen iguales después del último criterio, el sistema conserva su orden interno y asigna posiciones consecutivas.</small>
+      </div>
+    </article>
+  );
+}
+
+const rankingCriterionDetails = {
+  points: {
+    label: "Puntos de clasificación",
+    value: (standing) => standing.points,
+    format: (value) => `${value} pts`,
+  },
+  won: {
+    label: "Partidos ganados",
+    value: (standing) => standing.won,
+    format: (value) => `${value} ganado${value === 1 ? "" : "s"}`,
+  },
+  difference: {
+    label: "Diferencia de juegos",
+    value: (standing) => standing.points_for - standing.points_against,
+    format: (value) => `${value > 0 ? "+" : ""}${value}`,
+  },
+  points_for: {
+    label: "Juegos a favor",
+    value: (standing) => standing.points_for,
+    format: (value) => `${value} juegos`,
+  },
+  played: {
+    label: "Partidos jugados",
+    value: (standing) => standing.played,
+    format: (value) => `${value} jugados`,
+  },
+};
+
+function humanList(items) {
+  if (items.length < 2) return items[0] || "";
+  if (items.length === 2) return `${items[0]} y ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} y ${items.at(-1)}`;
+}
+
+function standingNames(standings) {
+  return humanList(standings.map((standing) => pairName(standing.pair)));
+}
+
+function finalFixtureMatchLabel(roundName) {
+  if (/Final oro y plata/i.test(roundName || "")) return "Oro y plata";
+  if (/Partido por bronce/i.test(roundName || "")) return "Bronce y 4.º lugar";
+  const positions = (roundName || "").match(/Definición puestos\s+(\d+)\s+y\s+(\d+)/i);
+  return positions ? `Puestos ${positions[1]} y ${positions[2]}` : "Definición de posiciones";
+}
+
+function finalMatchFormatLabel(roundName) {
+  return /Tiebreak a 7/i.test(roundName || "") ? "Tiebreak a 7" : "Partido normal";
+}
+
+function applyFinalMatchFormat(match, format) {
+  if (format !== "tiebreak") return match;
+  const timeMatch = match.round_name.match(/\s-\s(\d{1,2}:\d{2}-\d{1,2}:\d{2})$/);
+  const roundName = timeMatch
+    ? match.round_name.replace(timeMatch[0], ` - Tiebreak a 7 - ${timeMatch[1]}`)
+    : `${match.round_name} - Tiebreak a 7`;
+  return { ...match, round_name: roundName };
+}
+
+function FinalFixturePanel({ plans, pairs, expanded, setExpanded, loading, onGenerate }) {
+  const [finalMatchFormat, setFinalMatchFormat] = useState("normal");
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const proposedMatches = plans.flatMap((plan) => plan.proposedMatches.map((match) => applyFinalMatchFormat(match, finalMatchFormat)));
+  const hasExistingFixture = plans.some((plan) => plan.existingMatches.length);
+  const allCategoriesReady = plans.length > 0 && plans.every((plan) => plan.ready || plan.existingMatches.length);
+
+  return (
+    <article className="final-fixture-panel">
+      <div className="final-fixture-head">
+        <div>
+          <span>Quinta ronda</span>
+          <h3><Trophy size={18} /> Fixture final por posiciones</h3>
+          <p>El ranking actual siembra cruces 1.º–2.º, 3.º–4.º y así sucesivamente para definir el orden final completo.</p>
+        </div>
+        <button type="button" className="secondary-action" onClick={() => setExpanded(!expanded)}>
+          <Swords size={17} /> {expanded ? "Ocultar fixture" : hasExistingFixture ? "Ver fixture final" : "Armar fixture final"}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="final-fixture-body">
+          {proposedMatches.length > 0 && (
+            <div className="final-format-control">
+              <div>
+                <strong>Formato de la quinta ronda</strong>
+                <span>Define cómo se jugarán todos los partidos que ordenan las posiciones finales.</span>
+              </div>
+              <select value={finalMatchFormat} onChange={(event) => setFinalMatchFormat(event.target.value)}>
+                <option value="normal">Partido normal</option>
+                <option value="tiebreak">Tiebreak a 7 puntos</option>
+              </select>
+            </div>
+          )}
+          <div className="final-fixture-status-grid">
+            {plans.map((plan) => (
+              <section className={plan.ready || plan.existingMatches.length ? "ready" : "blocked"} key={plan.category}>
+                <div>
+                  <strong>{plan.category}</strong>
+                  <span>{plan.existingMatches.length ? "Fixture generado" : plan.ready ? `${plan.proposedMatches.length} partidos listos` : "Aún no disponible"}</span>
+                </div>
+                <small>{plan.existingMatches.length ? `${plan.existingMatches.length} cruces en ronda 5` : plan.reason || `${plan.slot} · ${plan.requiredCourts} canchas`}</small>
+              </section>
+            ))}
+          </div>
+
+          {plans.map((plan) => {
+            const fixtureMatches = plan.existingMatches.length
+              ? plan.existingMatches
+              : plan.proposedMatches.map((match) => applyFinalMatchFormat(match, finalMatchFormat));
+            return fixtureMatches.length ? (
+              <section className="final-fixture-category" key={`${plan.category}-preview`}>
+                <header>
+                  <div><strong>{plan.category}</strong><span>{plan.slot}</span></div>
+                  <span>{fixtureMatches.length} partidos · {plan.courts.length} canchas detectadas</span>
+                </header>
+                <div className="final-fixture-match-grid">
+                  {fixtureMatches.map((match) => (
+                    <article key={`${match.round_name}-${match.court}-${match.pair_one_id}`}>
+                      <div><span>Cancha {match.court}</span><strong>{finalFixtureMatchLabel(match.round_name)}</strong><em>{finalMatchFormatLabel(match.round_name)}</em></div>
+                      <p>{pairName(pairById.get(match.pair_one_id))}</p>
+                      <b>vs</b>
+                      <p>{pairName(pairById.get(match.pair_two_id))}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null;
+          })}
+
+          {!allCategoriesReady && (
+            <div className="final-fixture-warning">
+              <AlertCircle size={18} />
+              <span>Completa los resultados pendientes o revisa la disponibilidad de canchas antes de crear la ronda final.</span>
+            </div>
+          )}
+
+          {proposedMatches.length > 0 && (
+            <div className="final-fixture-actions">
+              <span>Se crearán {proposedMatches.length} partidos en una sola ronda, sin reemplazar la programación existente.</span>
+              <button type="button" disabled={!allCategoriesReady || !proposedMatches.length || loading} onClick={() => onGenerate(proposedMatches)}>
+                <Save size={17} /> Guardar ronda final
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function FinalRankingBlock({ categories }) {
+  if (!categories.length) return null;
+
+  return (
+    <article className="final-ranking-block">
+      <div className="block-head">
+        <div>
+          <h3><Trophy size={18} /> Ranking final del evento</h3>
+          <p className="muted">Cada cruce de la quinta ronda fija dos posiciones definitivas.</p>
+        </div>
+      </div>
+      <div className="final-ranking-grid">
+        {categories.map((category) => (
+          <section key={category.category}>
+            <header><strong>{category.category}</strong><span>{category.completedMatches}/{category.totalMatches} partidos cerrados</span></header>
+            {category.ready ? category.placements.map((placement) => (
+              <div className={`final-ranking-row position-${placement.position}`} key={`${category.category}-${placement.position}`}>
+                <span>{placement.position}</span>
+                <strong>{pairName(placement.pair)}</strong>
+                <small>{placement.position === 1 ? "Oro" : placement.position === 2 ? "Plata" : placement.position === 3 ? "Bronce" : "Posición final"}</small>
+              </div>
+            )) : (
+              <div className="final-ranking-pending">
+                <Clock size={18} />
+                <span>El ranking final aparecerá al cerrar todos los partidos de definición sin empates.</span>
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function buildTieExplanation(group, tiebreakers) {
+  let unresolved = [group];
+  const steps = [];
+
+  for (const criterion of tiebreakers) {
+    const detail = rankingCriterionDetails[criterion];
+    if (!detail || !unresolved.length) continue;
+    const nextUnresolved = [];
+
+    unresolved.forEach((subgroup) => {
+      const buckets = new Map();
+      subgroup.forEach((standing) => {
+        const value = detail.value(standing);
+        buckets.set(value, [...(buckets.get(value) || []), standing]);
+      });
+
+      if (buckets.size === 1) {
+        const value = detail.value(subgroup[0]);
+        steps.push({
+          tone: "tied",
+          criterion: detail.label,
+          text: `${standingNames(subgroup)} continuaron empatadas: todas registraron ${detail.format(value)}.`,
+        });
+        nextUnresolved.push(subgroup);
+        return;
+      }
+
+      const orderedBuckets = [...buckets.entries()].sort((left, right) => right[0] - left[0]);
+      steps.push({
+        tone: "resolved",
+        criterion: detail.label,
+        text: `Este criterio ordenó el grupo: ${orderedBuckets.map(([value, standings]) => `${standingNames(standings)} (${detail.format(value)})`).join("; ")}.`,
+      });
+      orderedBuckets.forEach(([, standings]) => {
+        if (standings.length > 1) nextUnresolved.push(standings);
+      });
+    });
+
+    unresolved = nextUnresolved;
+  }
+
+  unresolved.forEach((subgroup) => {
+    steps.push({
+      tone: "unresolved",
+      criterion: "Igualdad total",
+      text: `${standingNames(subgroup)} terminaron iguales en todos los criterios configurados. El sistema mantuvo su orden interno para asignar posiciones consecutivas.`,
+    });
+  });
+
+  return steps;
+}
+
+function RankingExplanation({ standings, config }) {
+  const mergedConfig = { ...defaultRankingConfig, ...(config || {}) };
+  const tiebreakers = mergedConfig.tiebreakers?.length ? mergedConfig.tiebreakers : defaultRankingConfig.tiebreakers;
+  const byCategory = standings.reduce((groups, standing) => {
+    const category = standing.pair.category || "Sin categoría";
+    groups[category] = [...(groups[category] || []), standing].sort((left, right) => left.position - right.position);
+    return groups;
+  }, {});
+
+  return (
+    <details className="ranking-explanation">
+      <summary>
+        <div>
+          <h3><ListChecks size={16} /> Explicación de clasificación</h3>
+          <p className="muted">Cómo se resolvió el orden dentro de cada categoría.</p>
+        </div>
+        <span>detalle</span>
+      </summary>
+      <div className="ranking-explanation-grid">
+        {Object.entries(byCategory).map(([category, categoryStandings]) => {
+          const tiesByPoints = Object.values(categoryStandings.reduce((groups, standing) => {
+            groups[standing.points] = [...(groups[standing.points] || []), standing];
+            return groups;
+          }, {}))
+            .filter((group) => group.length > 1)
+            .sort((left, right) => Math.min(...left.map((standing) => standing.position)) - Math.min(...right.map((standing) => standing.position)));
+
+          return (
+            <section className="ranking-category-explanation" key={category}>
+              <header>
+                <strong>{category}</strong>
+                <span>{tiesByPoints.length ? `${tiesByPoints.length} empate${tiesByPoints.length === 1 ? "" : "s"} analizado${tiesByPoints.length === 1 ? "" : "s"}` : "Sin empates"}</span>
+              </header>
+              {!tiesByPoints.length ? (
+                <div className="ranking-no-ties">
+                  <Check size={18} />
+                  <p><strong>El orden se definió únicamente por puntos.</strong> Ninguna pareja terminó con el mismo puntaje de clasificación.</p>
+                </div>
+              ) : tiesByPoints.map((group) => {
+                const positions = group.map((standing) => standing.position).sort((a, b) => a - b);
+                const steps = buildTieExplanation(group, tiebreakers);
+                return (
+                  <article className="ranking-tie-story" key={`${category}-${group[0].points}-${positions.join("-")}`}>
+                    <div className="ranking-tie-summary">
+                      <span>Posiciones {humanList(positions)}</span>
+                      <strong>{standingNames(group)}</strong>
+                      <small>Empataron con {group[0].points} puntos de clasificación.</small>
+                    </div>
+                    <ol>
+                      {steps.map((step, index) => (
+                        <li className={step.tone} key={`${step.criterion}-${index}`}>
+                          <span>{index + 1}</span>
+                          <div><strong>{step.criterion}</strong><p>{step.text}</p></div>
+                        </li>
+                      ))}
+                    </ol>
+                  </article>
+                );
+              })}
+            </section>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function PairPerformanceModal({ standing, matches, pairs, onClose }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const pairId = standing.pair_id || standing.pair.id;
+  const pairMatches = matches
+    .filter((match) => match.pair_one_id === pairId || match.pair_two_id === pairId)
+    .sort((left, right) => minutesFromMatch(left) - minutesFromMatch(right) || left.id - right.id);
+
+  useEffect(() => {
+    function closeOnEscape(event) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="pair-performance-modal" role="dialog" aria-modal="true" aria-labelledby="pair-performance-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <span>{standing.pair.category} · Posición {standing.position}</span>
+            <h2 id="pair-performance-title">{pairName(standing.pair)}</h2>
+            <p>Detalle de los partidos que construyen su clasificación actual.</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar detalle de la dupla"><X size={18} /></button>
+        </header>
+
+        <div className="pair-performance-kpis">
+          <div><span>Jugados</span><strong>{standing.played}</strong></div>
+          <div><span>Ganados</span><strong>{standing.won}</strong></div>
+          <div><span>Empatados</span><strong>{standing.played - standing.won - standing.lost}</strong></div>
+          <div><span>Diferencia</span><strong>{standing.points_for - standing.points_against > 0 ? "+" : ""}{standing.points_for - standing.points_against}</strong></div>
+          <div><span>Puntos</span><strong>{standing.points}</strong></div>
+        </div>
+
+        <div className="pair-match-history">
+          <div className="pair-match-history-head">
+            <strong>Historial de partidos</strong>
+            <span>{pairMatches.filter(matchHasResult).length}/{pairMatches.length} con resultado</span>
+          </div>
+          {pairMatches.map((match, index) => {
+            const isPairOne = match.pair_one_id === pairId;
+            const opponent = pairById.get(isPairOne ? match.pair_two_id : match.pair_one_id);
+            const ownScore = isPairOne ? match.pair_one_score : match.pair_two_score;
+            const opponentScore = isPairOne ? match.pair_two_score : match.pair_one_score;
+            const completed = matchHasResult(match);
+            const result = !completed ? "pending" : Number(ownScore) > Number(opponentScore) ? "win" : Number(ownScore) < Number(opponentScore) ? "loss" : "draw";
+            const schedule = parseFixtureRoundLabel(match.round_name);
+            return (
+              <article className={`pair-match-item ${result}`} key={match.id}>
+                <div className="pair-match-sequence">
+                  <span>{index + 1}</span>
+                  <small>{schedule.time || schedule.turn}</small>
+                </div>
+                <div className="pair-match-opponent">
+                  <span>vs</span>
+                  <strong>{opponent ? pairName(opponent) : `Pareja ${isPairOne ? match.pair_two_id : match.pair_one_id}`}</strong>
+                  <small>Cancha {match.court || "-"}{/Tiebreak a 7/i.test(match.round_name || "") ? " · Tiebreak a 7" : ""}</small>
+                </div>
+                <div className="pair-match-score">
+                  <strong>{completed ? `${ownScore}–${opponentScore}` : "Pendiente"}</strong>
+                  <span>{result === "win" ? "Victoria" : result === "loss" ? "Derrota" : result === "draw" ? "Empate" : "Sin jugar"}</span>
+                </div>
+              </article>
+            );
+          })}
+          {!pairMatches.length && <div className="pair-match-empty">Esta dupla todavía no tiene partidos programados.</div>}
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function RankingBlock({ ranking, standings, matches = [], pairs = [], detailed = false }) {
+  const [selectedStanding, setSelectedStanding] = useState(null);
   const standingsByCategory = standings.reduce((groups, standing) => {
     const category = standing.pair.category || "Sin categoria";
     groups[category] = [...(groups[category] || []), standing];
@@ -4763,29 +6297,56 @@ function RankingBlock({ ranking, standings }) {
     <article className="data-block">
       <h3><Medal size={16} /> Ranking</h3>
       {Object.entries(standingsByCategory).length ? (
-        <div className="ranking-grid">
+        <div className={`ranking-grid ${detailed ? "detailed" : ""}`}>
           {Object.entries(standingsByCategory).map(([category, categoryStandings]) => (
-            <article className="ranking-table" key={category}>
+            <article className={`ranking-table ${detailed ? "detailed" : ""}`} key={category}>
               <div className="ranking-title">
                 <strong>{category}</strong>
                 <span>{categoryStandings.length} parejas</span>
               </div>
-              <div className="ranking-row ranking-header">
+              <div className={`ranking-row ranking-header ${detailed ? "detailed" : ""}`}>
                 <span>#</span>
                 <span>Pareja</span>
                 <span>J</span>
                 <span>G</span>
-                <span>Pts</span>
+                {detailed && <span>E</span>}
+                {detailed && <span>P</span>}
+                {detailed && <span>PF</span>}
+                {detailed && <span>PC</span>}
                 <span>Dif</span>
+                <span>Pts</span>
               </div>
               {categoryStandings.map((standing) => (
-                <div className="ranking-row" key={standing.id}>
+                <div
+                  className={`ranking-row ranking-drill-row ${detailed ? "detailed" : ""}`}
+                  key={standing.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Ver partidos de ${pairName(standing.pair)}`}
+                  onClick={() => setSelectedStanding(standing)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedStanding(standing);
+                    }
+                  }}
+                >
                   <span>{standing.position}</span>
-                  <span>{pairName(standing.pair)}</span>
+                  <span className="ranking-pair-name">
+                    <span className="pair-names">
+                      <span className="pair-p1">{standing.pair.player_one?.name || "—"}</span>
+                      <span className={`pair-p2${standing.pair.player_two ? "" : " pair-p2-solo"}`}>{standing.pair.player_two?.name || "busca partner"}</span>
+                    </span>
+                    <Eye size={14} />
+                  </span>
                   <span>{standing.played}</span>
                   <span>{standing.won}</span>
-                  <span>{standing.points}</span>
+                  {detailed && <span>{standing.played - standing.won - standing.lost}</span>}
+                  {detailed && <span>{standing.lost}</span>}
+                  {detailed && <span>{standing.points_for}</span>}
+                  {detailed && <span>{standing.points_against}</span>}
                   <span>{standing.points_for - standing.points_against}</span>
+                  <span>{standing.points}</span>
                 </div>
               ))}
             </article>
@@ -4795,6 +6356,9 @@ function RankingBlock({ ranking, standings }) {
         (ranking.length ? ranking : []).map((standing) => (
           <p key={standing.id}>{standing.position}. {pairName(standing.pair)} - {standing.points} pts</p>
         ))
+      )}
+      {selectedStanding && (
+        <PairPerformanceModal standing={selectedStanding} matches={matches} pairs={pairs} onClose={() => setSelectedStanding(null)} />
       )}
     </article>
   );
@@ -5142,21 +6706,22 @@ function plannerSlotGroup(slot, assignments) {
   return oneGroup && oneGroup === twoGroup ? oneGroup : "";
 }
 
+const AMERICANO_PAIR_COLORS = [
+  "#e5f6ff",
+  "#e8f8df",
+  "#fff1c7",
+  "#ffe1d6",
+  "#f0e4ff",
+  "#dcf8f3",
+  "#ffe3ef",
+  "#e7ecff",
+  "#f4efd8",
+  "#dff4ea",
+  "#fde7c8",
+  "#e1f1f5",
+];
+
 function americanoFixedPairs(pairs = []) {
-  const colors = [
-    "#e5f6ff",
-    "#e8f8df",
-    "#fff1c7",
-    "#ffe1d6",
-    "#f0e4ff",
-    "#dcf8f3",
-    "#ffe3ef",
-    "#e7ecff",
-    "#f4efd8",
-    "#dff4ea",
-    "#fde7c8",
-    "#e1f1f5",
-  ];
   return pairs
     .filter((pair) => pair.status === "completa" && pair.player_two_id)
     .map((pair) => ({
@@ -5174,7 +6739,7 @@ function americanoFixedPairs(pairs = []) {
     ))
     .map((pair, index) => ({
       ...pair,
-      color: colors[index % colors.length],
+      color: AMERICANO_PAIR_COLORS[index % AMERICANO_PAIR_COLORS.length],
     }));
 }
 
@@ -5182,7 +6747,70 @@ function americanoPairMatchKey(left, right) {
   return [left.id, right.id].sort().join("|");
 }
 
-function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, matchMinutes = 20, courts = [] }) {
+function americanoPairFromSavedPair(pair, fallbackId, fallbackCategory = "") {
+  const pairId = pair?.pairId ?? pair?.id ?? fallbackId;
+  const name = pair?.name || pair?.shortName || (pair?.player_one ? pairName(pair) : `Pareja ${fallbackId || ""}`.trim());
+  return {
+    id: String(pairId || ""),
+    pairId,
+    name,
+    shortName: name,
+    category: pair?.category || fallbackCategory || "Sin categoria",
+    level: Number(pair?.level || pair?.skill_level || 5),
+    color: pair?.color || AMERICANO_PAIR_COLORS[0],
+  };
+}
+
+function courtNumber(court) {
+  const match = String(court || "").match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function courtMatchesPreference(court, preference) {
+  if (!preference || preference === "random") return true;
+  const number = courtNumber(court);
+  if (!number) return true;
+  return preference === "odd" ? number % 2 === 1 : number % 2 === 0;
+}
+
+function categoryAllowedOnCourt(category, court, preferences = {}) {
+  return courtMatchesPreference(court, preferences[category] || "random");
+}
+
+function pairCourtMoveCost(pair, court) {
+  if (!pair?.lastCourt) return 0;
+  if (String(pair.lastCourt) === String(court)) return 0;
+  const previous = courtNumber(pair.lastCourt);
+  const next = courtNumber(court);
+  if (!previous || !next) return 5;
+  const parityCost = previous % 2 === next % 2 ? 1 : 4;
+  return parityCost + (Math.abs(previous - next) * 0.15);
+}
+
+function circleRoundRobin(items) {
+  if (items.length < 2) return [];
+  const list = [...items];
+  if (list.length % 2 === 1) list.push(null);
+  const n = list.length;
+  const half = n / 2;
+  const fixed = list[n - 1];
+  const rotating = list.slice(0, n - 1);
+  const rounds = [];
+  for (let r = 0; r < n - 1; r++) {
+    const rotated = [...rotating.slice(r), ...rotating.slice(0, r)];
+    const round = [];
+    if (fixed !== null) round.push([fixed, rotated[0]]);
+    for (let i = 1; i < half; i++) {
+      const a = rotated[i];
+      const b = rotated[n - 1 - i];
+      if (a !== null && b !== null) round.push([a, b]);
+    }
+    rounds.push(round);
+  }
+  return rounds;
+}
+
+function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, matchMinutes = 20, courts = [], categoryCourtPreferences = {} }) {
   const warnings = [];
   const usableCourts = courts.length ? courts : ["1"];
   const start = minutesFromSlot(startTime || "17:00");
@@ -5214,58 +6842,73 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     acc[pair.category] = (acc[pair.category] || 0) + 1;
     return acc;
   }, {})).forEach(([category, count]) => {
+    const categoryCourts = usableCourts.filter((court) => categoryAllowedOnCourt(category, court, categoryCourtPreferences));
+    const requiredCourts = Math.floor(count / 2);
     if (count === 1) warnings.push(`${category} tiene solo 1 pareja; no puede generar cruces internos.`);
     else if (count % 2 !== 0) warnings.push(`${category} tiene cantidad impar; una pareja descansará por ronda.`);
+    if (categoryCourts.length && categoryCourts.length < requiredCourts) {
+      warnings.push(`${category} tiene ${categoryCourts.length} cancha${categoryCourts.length === 1 ? "" : "s"} preferida${categoryCourts.length === 1 ? "" : "s"} para ${requiredCourts} partidos simultáneos; ${requiredCourts - categoryCourts.length} pareja${requiredCourts - categoryCourts.length === 1 ? "" : "s"} usará${requiredCourts - categoryCourts.length === 1 ? "" : "n"} canchas alternativas.`);
+    }
+    if (!categoryCourts.length) warnings.push(`${category} no tiene canchas disponibles con la regla seleccionada.`);
   });
+
+  const categoryGroupMap = pairs.reduce((acc, pair) => {
+    (acc[pair.category] = acc[pair.category] || []).push(pair);
+    return acc;
+  }, {});
+  const categoryRRSchedules = Object.fromEntries(
+    Object.entries(categoryGroupMap).map(([cat, catPairs]) => [
+      cat,
+      circleRoundRobin([...catPairs].sort((a, b) => a.id - b.id)),
+    ])
+  );
 
   for (let roundIndex = 0; roundIndex < roundCount && courtsPerRound > 0; roundIndex += 1) {
     const roundStart = validStart + (roundIndex * minutesPerMatch);
     const usedThisRound = new Set();
+    const courtsUsedThisRound = new Set();
     const matches = [];
 
-    for (let courtIndex = 0; courtIndex < courtsPerRound; courtIndex += 1) {
-      let best = null;
-      const pool = pairs.filter((pair) => !usedThisRound.has(pair.id));
-      if (pool.length < 2) break;
-
-      pool.forEach((one, oneIndex) => {
-        pool.slice(oneIndex + 1).forEach((two) => {
-          if (one.category !== two.category) return;
-          const oneStats = stats.get(one.id);
-          const twoStats = stats.get(two.id);
-          const key = americanoPairMatchKey(one, two);
-          const score = (
-            ((matchupCounts.get(key) || 0) * 80)
-            + (Math.abs(oneStats.matches - twoStats.matches) * 12)
-            + (Math.abs(oneStats.rests - twoStats.rests) * 3)
-            + (Math.abs(one.level - two.level) * 2)
-            - ((oneStats.rests + twoStats.rests) * 0.5)
-          );
-          if (!best || score < best.score) best = { pair_one: one, pair_two: two, score };
-        });
+    const roundMatchups = [];
+    Object.values(categoryRRSchedules).forEach((schedule) => {
+      if (!schedule.length) return;
+      const catRound = schedule[roundIndex % schedule.length];
+      catRound.forEach(([p1, p2]) => {
+        if (p1 && p2) roundMatchups.push({ pair_one: p1, pair_two: p2 });
       });
+    });
 
-      if (!best) break;
+    roundMatchups.forEach(({ pair_one, pair_two }) => {
+      if (matches.length >= courtsPerRound) return;
+      const availableCourts = usableCourts.filter((c) => !courtsUsedThisRound.has(c));
+      if (!availableCourts.length) return;
+      const preferredCourts = availableCourts.filter((c) => categoryAllowedOnCourt(pair_one.category, c, categoryCourtPreferences));
+      const court = (preferredCourts.length > 0 ? preferredCourts : availableCourts)[0];
+
+      courtsUsedThisRound.add(court);
+      usedThisRound.add(pair_one.id);
+      usedThisRound.add(pair_two.id);
+      stats.get(pair_one.id).matches += 1;
+      stats.get(pair_two.id).matches += 1;
+      stats.get(pair_one.id).lastCourt = court;
+      stats.get(pair_two.id).lastCourt = court;
+      stats.get(pair_one.id).rivalsSet.add(pair_two.id);
+      stats.get(pair_two.id).rivalsSet.add(pair_one.id);
+      const key = americanoPairMatchKey(pair_one, pair_two);
+      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
 
       matches.push({
         round: roundIndex + 1,
-        court: usableCourts[courtIndex],
+        court,
         start_time: minutesToTime(roundStart),
         end_time: minutesToTime(roundStart + minutesPerMatch),
-        pair_one: best.pair_one,
-        pair_two: best.pair_two,
+        pair_one,
+        pair_two,
         locked: false,
       });
+    });
 
-      usedThisRound.add(best.pair_one.id);
-      usedThisRound.add(best.pair_two.id);
-      stats.get(best.pair_one.id).matches += 1;
-      stats.get(best.pair_two.id).matches += 1;
-      stats.get(best.pair_one.id).rivalsSet.add(best.pair_two.id);
-      stats.get(best.pair_two.id).rivalsSet.add(best.pair_one.id);
-      const key = americanoPairMatchKey(best.pair_one, best.pair_two);
-      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
-    }
+    matches.sort((a, b) => Number(a.court) - Number(b.court));
 
     const resting = pairs.filter((pair) => !usedThisRound.has(pair.id));
     resting.forEach((pair) => {
@@ -5295,6 +6938,7 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     .sort((left, right) => right.matches - left.matches || left.rests - right.rests || left.name.localeCompare(right.name));
   const matchCounts = pairStats.map((stat) => stat.matches);
   const repeatedMatchups = [...matchupCounts.values()].filter((count) => count > 1).length;
+  const actualCourtsPerRound = rounds.length > 0 ? Math.max(...rounds.map((round) => round.matches.length), 0) : 0;
 
   return {
     rounds,
@@ -5303,9 +6947,91 @@ function generateFixedPairAmericanoFixture({ pairs = [], startTime, endTime, mat
     warnings,
     restPerRound: Math.max(0, pairs.length - (courtsPerRound * 2)),
     timeWindow: rounds.length ? `${rounds[0].start_time}-${rounds[rounds.length - 1].end_time}` : "Sin horario",
-    summary: `${matches.length} partidos · ${rounds.length} rondas · ${courtsPerRound} cancha${courtsPerRound === 1 ? "" : "s"}`,
+    summary: `${matches.length} partidos · ${rounds.length} rondas · ${actualCourtsPerRound} cancha${actualCourtsPerRound === 1 ? "" : "s"}`,
     matchesPerPairRange: matchCounts.length ? `${Math.min(...matchCounts)}-${Math.max(...matchCounts)} por pareja` : "Sin parejas",
     repeatSummary: `${repeatedMatchups} repetido${repeatedMatchups === 1 ? "" : "s"}`,
+  };
+}
+
+function matchesToEditableRounds(matches, pairById) {
+  if (!matches.length) return null;
+  const roundMap = new Map();
+  for (const match of matches) {
+    const key = match.round_name || "Grupo";
+    if (!roundMap.has(key)) roundMap.set(key, []);
+    roundMap.get(key).push(match);
+  }
+  const entries = [...roundMap.entries()].sort(([a], [b]) => {
+    const numA = Number(a.match(/Ronda\s+(\d+)/i)?.[1] ?? 999);
+    const numB = Number(b.match(/Ronda\s+(\d+)/i)?.[1] ?? 999);
+    const timeA = (a.match(/(\d{1,2}:\d{2})-/) || [])[1] || "";
+    const timeB = (b.match(/(\d{1,2}:\d{2})-/) || [])[1] || "";
+    return numA - numB || timeA.localeCompare(timeB) || a.localeCompare(b);
+  });
+  return entries.map(([roundName, roundMatches], idx) => {
+    const parsed = parseFixtureRoundLabel(roundName);
+    const [startTime = "", endTime = ""] = (parsed.time || "").split("-");
+    const roundNumber = Number(roundName.match(/Ronda\s+(\d+)/i)?.[1] || idx + 1);
+    const sorted = [...roundMatches].sort((a, b) =>
+      String(a.court || "").localeCompare(String(b.court || ""), undefined, { numeric: true }),
+    );
+    return {
+      round: roundNumber,
+      roundName,
+      start_time: startTime,
+      end_time: endTime,
+      resting: [],
+      matches: sorted.map((match) => {
+        const pairOne = pairById.get(match.pair_one_id);
+        const pairTwo = pairById.get(match.pair_two_id);
+        const fallbackCategory = fixtureCategoryFromPairs(pairOne, pairTwo, parsed.category || "");
+        return {
+          pair_one: americanoPairFromSavedPair(pairOne, match.pair_one_id, fallbackCategory),
+          pair_two: americanoPairFromSavedPair(pairTwo, match.pair_two_id, fallbackCategory),
+          court: String(match.court || ""),
+          start_time: startTime,
+          end_time: endTime,
+          category: fallbackCategory,
+          locked: false,
+        };
+      }),
+    };
+  });
+}
+
+function computeRoundStats(rounds) {
+  const stats = new Map();
+  const matchupCounts = new Map();
+  rounds.forEach((round) => {
+    round.matches.forEach((match) => {
+      const one = match.pair_one;
+      const two = match.pair_two;
+      if (!stats.has(one.id)) stats.set(one.id, { ...one, matches: 0, rests: 0, rivalsSet: new Set() });
+      if (!stats.has(two.id)) stats.set(two.id, { ...two, matches: 0, rests: 0, rivalsSet: new Set() });
+      stats.get(one.id).matches += 1;
+      stats.get(two.id).matches += 1;
+      stats.get(one.id).rivalsSet.add(two.id);
+      stats.get(two.id).rivalsSet.add(one.id);
+      const key = americanoPairMatchKey(one, two);
+      matchupCounts.set(key, (matchupCounts.get(key) || 0) + 1);
+    });
+    (round.resting || []).forEach((pair) => {
+      if (!stats.has(pair.id)) stats.set(pair.id, { ...pair, matches: 0, rests: 0, rivalsSet: new Set() });
+      stats.get(pair.id).rests += 1;
+    });
+  });
+  const pairStats = [...stats.values()]
+    .map((s) => ({ id: s.id, name: s.name, category: s.category, level: s.level, matches: s.matches, rests: s.rests, rivals: s.rivalsSet.size }))
+    .sort((a, b) => b.matches - a.matches || a.rests - b.rests || a.name.localeCompare(b.name));
+  const matchCounts = pairStats.map((s) => s.matches);
+  const repeatedMatchups = [...matchupCounts.values()].filter((v) => v > 1).length;
+  const maxResting = rounds.length > 0 ? Math.max(...rounds.map((r) => (r.resting || []).length)) : 0;
+  return {
+    pairStats,
+    repeatedMatchups,
+    repeatSummary: `${repeatedMatchups} repetido${repeatedMatchups === 1 ? "" : "s"}`,
+    matchesPerPairRange: matchCounts.length ? `${Math.min(...matchCounts)}-${Math.max(...matchCounts)} por pareja` : "Sin parejas",
+    restPerRound: maxResting,
   };
 }
 
@@ -5875,8 +7601,10 @@ function ManualFixturePlanner({ eventId, pairs, matches, fixtureForm, setFixture
     categoryPairs.filter((pair) => getPlannerGroup(groupAssignments, pair.id) === label).length >= 2
   );
 
+  const plannerIsPrimary = (fixtureForm.mode || "manual_groups") === "manual_groups";
+
   return (
-    <details className="manual-planner" open={!matches.length}>
+    <details className="manual-planner" open={!matches.length && plannerIsPrimary}>
       <summary>Planner manual por rondas y canchas</summary>
       <div className="manual-planner-body">
         <div className="planner-command">
@@ -6115,54 +7843,7 @@ function DynamicFourPairFinals({ matches, pairs, standings, eventId, fixtureForm
               <strong>{plan.category}</strong>
               <span>{plan.allGroupResults ? "ranking listo" : `${plan.finishedGroupMatches}/${plan.totalGroupMatches} resultados fase`}</span>
             </div>
-            {plan.type === "three_group_semis" ? (
-              <>
-                <div className="qualifier-grid">
-                  {plan.groupPlans.map((group) => (
-                    <div className="qualifier-card" key={`${plan.category}-${group.groupName}`}>
-                      <span>{group.groupName}</span>
-                      <strong>{group.finishedMatches}/{group.totalMatches} resultados</strong>
-                      <ol>
-                        {group.standings.map((standing, index) => (
-                          <li key={standing.pair.id}>
-                            {index + 1}. {pairName(standing.pair)} <b>{standing.points} pts</b>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  ))}
-                  <div className="dynamic-court-card">
-                    <span>Semifinales · {plan.semiTime}</span>
-                    <strong>{plan.allGroupResults ? "Cruces definidos" : "Esperando las tres rondas"}</strong>
-                    <p>
-                      Cancha {plan.semis[0]?.court || "1"}: {plan.semis[0]
-                        ? `${pairName(pairById.get(plan.semis[0].pair_one_id))} vs ${pairName(pairById.get(plan.semis[0].pair_two_id))}`
-                        : "1.º Grupo A vs 1.º Grupo C"}
-                    </p>
-                    <p>
-                      Cancha {plan.semis[1]?.court || "3"}: {plan.semis[1]
-                        ? `${pairName(pairById.get(plan.semis[1].pair_one_id))} vs ${pairName(pairById.get(plan.semis[1].pair_two_id))}`
-                        : "1.º Grupo B vs mejor 2.º"}
-                    </p>
-                    {plan.bestSecond && <small>Mejor segundo actual: {pairName(plan.bestSecond.pair)} · {plan.bestSecond.points} pts</small>}
-                  </div>
-                  <div className="dynamic-court-card">
-                    <span>Finales · {plan.finalTime}</span>
-                    <strong>Final y tercer lugar</strong>
-                    <p>Cancha {plan.finals[0]?.court || "1"}: {plan.finals[0] ? `${pairName(pairById.get(plan.finals[0].pair_one_id))} vs ${pairName(pairById.get(plan.finals[0].pair_two_id))}` : "Ganadores de semifinal"}</p>
-                    <p>Cancha {plan.finals[1]?.court || "3"}: {plan.finals[1] ? `${pairName(pairById.get(plan.finals[1].pair_one_id))} vs ${pairName(pairById.get(plan.finals[1].pair_two_id))}` : "Perdedores de semifinal"}</p>
-                  </div>
-                </div>
-                <div className="dynamic-actions">
-                  <button type="button" className="secondary-action" disabled={!canCreateSemis} onClick={() => createMatches(missingSemis)}>
-                    Crear semifinales
-                  </button>
-                  <button type="button" className="secondary-action" disabled={!canCreateFinals} onClick={() => createMatches(missingFinals)}>
-                    Crear final y 3er lugar
-                  </button>
-                </div>
-              </>
-            ) : plan.type === "placements" ? (
+            {plan.type === "placements" ? (
               <>
                 <div className="qualifier-grid">
                   {plan.groupPlans.map((group) => (
