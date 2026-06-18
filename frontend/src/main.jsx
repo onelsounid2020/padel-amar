@@ -6748,15 +6748,15 @@ function americanoPairMatchKey(left, right) {
 }
 
 function americanoPairFromSavedPair(pair, fallbackId, fallbackCategory = "") {
-  const pairId = pair?.id ?? fallbackId;
-  const name = pair ? pairName(pair) : `Pareja ${fallbackId || ""}`.trim();
+  const pairId = pair?.pairId ?? pair?.id ?? fallbackId;
+  const name = pair?.name || pair?.shortName || (pair?.player_one ? pairName(pair) : `Pareja ${fallbackId || ""}`.trim());
   return {
     id: String(pairId || ""),
     pairId,
     name,
     shortName: name,
     category: pair?.category || fallbackCategory || "Sin categoria",
-    level: Number(pair?.skill_level || 5),
+    level: Number(pair?.level || pair?.skill_level || 5),
     color: pair?.color || AMERICANO_PAIR_COLORS[0],
   };
 }
