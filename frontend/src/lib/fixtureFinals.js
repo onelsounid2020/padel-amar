@@ -296,10 +296,180 @@ export function computeGroupPlacementFinalPlans({ pairs, matches, fixtureConfig 
     .filter(Boolean);
 }
 
+function placementBracketLabel(position) {
+  if (position === 1) return "Oro";
+  if (position === 2) return "Plata";
+  if (position === 3) return "Consuelo";
+  return "Cierre";
+}
+
+function placementFinalLabels(position) {
+  if (position === 1) return ["Final oro", "3er lugar"];
+  if (position === 2) return ["5to lugar", "7mo lugar"];
+  if (position === 3) return ["9no lugar", "11vo lugar"];
+  return ["13er lugar", "15to lugar"];
+}
+
+export function computeFourGroupFinalPlans({ pairs, matches, fixtureConfig = {} }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const setMinutes = Number(fixtureConfig.set_minutes || 20);
+  const fallbackStart = fixtureConfig.start_time || "21:10";
+  const matchRows = matches.map((match) => {
+    const schedule = parseFixtureRound(match.round_name);
+    const pairOne = pairById.get(match.pair_one_id);
+    const pairTwo = pairById.get(match.pair_two_id);
+    const category = fixtureCategoryFromPairs(pairOne, pairTwo, schedule.category);
+    return { match, schedule, pairOne, pairTwo, category, done: hasResult(match) };
+  });
+  const categories = categoryPairGroups(pairs);
+
+  return Object.entries(categories)
+    .filter(([, categoryPairs]) => categoryPairs.length === 16)
+    .map(([category]) => {
+      const categoryRows = matchRows.filter((row) => row.category === category);
+      const groupRows = categoryRows.filter((row) => /^Grupo\s+/i.test(row.schedule.group || ""));
+      const groups = groupRows.reduce((collection, row) => {
+        const groupName = row.schedule.group;
+        collection[groupName] = [...(collection[groupName] || []), row];
+        return collection;
+      }, {});
+      const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      if (groupNames.length < 4) return null;
+
+      const groupPlans = groupNames.slice(0, 4).map((groupName) => {
+        const rows = groups[groupName];
+        const standingsMap = new Map();
+        rows.forEach((row) => {
+          [row.pairOne, row.pairTwo].filter(Boolean).forEach((pair) => {
+            if (!standingsMap.has(pair.id)) standingsMap.set(pair.id, emptyGroupStanding(pair));
+          });
+        });
+        rows.forEach((row) => {
+          if (!hasResult(row.match)) return;
+          const one = standingsMap.get(row.match.pair_one_id);
+          const two = standingsMap.get(row.match.pair_two_id);
+          if (!one || !two) return;
+          const oneScore = Number(row.match.pair_one_score);
+          const twoScore = Number(row.match.pair_two_score);
+          one.played += 1;
+          two.played += 1;
+          one.pointsFor += oneScore;
+          one.pointsAgainst += twoScore;
+          two.pointsFor += twoScore;
+          two.pointsAgainst += oneScore;
+          if (oneScore > twoScore) {
+            one.won += 1;
+            one.points += 3;
+          } else if (twoScore > oneScore) {
+            two.won += 1;
+            two.points += 3;
+          } else {
+            one.points += 1;
+            two.points += 1;
+          }
+        });
+        return {
+          groupName,
+          rows,
+          standings: sortGroupStandings([...standingsMap.values()]),
+          totalMatches: 6,
+          finishedMatches: rows.filter((row) => row.done).length,
+        };
+      });
+
+      const groupsReady = groupPlans.every((group) => group.rows.length >= group.totalMatches && group.finishedMatches >= group.totalMatches && group.standings.length >= 4);
+      const groupEndTimes = groupRows.map((row) => slotEndMinutes(row.schedule.time || row.schedule.turn)).filter(Boolean);
+      const latestEnd = groupEndTimes.length ? Math.max(...groupEndTimes) : minutesFromSlot(fallbackStart);
+      const semiTime = playoffSlotLabel(latestEnd, setMinutes, 0);
+      const finalTime = playoffSlotLabel(latestEnd, setMinutes, 1);
+      const courts = [...new Set(groupRows.map((row) => row.match.court).filter(Boolean))]
+        .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+      const rowsByRoundName = categoryRows.reduce((collection, row) => {
+        collection[row.match.round_name || ""] = row.match;
+        return collection;
+      }, {});
+
+      const semifinalPlan = [];
+      for (let position = 1; position <= 4; position += 1) {
+        const bracket = placementBracketLabel(position);
+        const semiOneName = `${category} - Fase final - Ronda 4 ${bracket} Semifinal 1 - ${semiTime}`;
+        const semiTwoName = `${category} - Fase final - Ronda 4 ${bracket} Semifinal 2 - ${semiTime}`;
+        const first = groupPlans[0].standings[position - 1]?.pair;
+        const second = groupPlans[1].standings[position - 1]?.pair;
+        const third = groupPlans[2].standings[position - 1]?.pair;
+        const fourth = groupPlans[3].standings[position - 1]?.pair;
+        if (groupsReady && first && second && !rowsByRoundName[semiOneName]) {
+          semifinalPlan.push({
+            pair_one_id: first.id,
+            pair_two_id: second.id,
+            round_name: semiOneName,
+            court: courts[(position - 1) * 2] || courts[0] || "1",
+          });
+        }
+        if (groupsReady && third && fourth && !rowsByRoundName[semiTwoName]) {
+          semifinalPlan.push({
+            pair_one_id: third.id,
+            pair_two_id: fourth.id,
+            round_name: semiTwoName,
+            court: courts[((position - 1) * 2) + 1] || courts[1] || courts[0] || "1",
+          });
+        }
+      }
+
+      const finalPlan = [];
+      for (let position = 1; position <= 4; position += 1) {
+        const bracket = placementBracketLabel(position);
+        const semiOne = categoryRows.find((row) => new RegExp(`Ronda 4 ${bracket} Semifinal 1`, "i").test(row.match.round_name || ""))?.match;
+        const semiTwo = categoryRows.find((row) => new RegExp(`Ronda 4 ${bracket} Semifinal 2`, "i").test(row.match.round_name || ""))?.match;
+        if (!semiOne || !semiTwo || !hasResult(semiOne) || !hasResult(semiTwo)) continue;
+
+        const semiOneResult = resolveMatchResult(semiOne);
+        const semiTwoResult = resolveMatchResult(semiTwo);
+        const winners = [semiOneResult.winnerId, semiTwoResult.winnerId].map((id) => pairById.get(id)).filter(Boolean);
+        const losers = [semiOneResult.loserId, semiTwoResult.loserId].map((id) => pairById.get(id)).filter(Boolean);
+        const [winnerLabel, loserLabel] = placementFinalLabels(position);
+        const winnerName = `${category} - Fase final - Ronda 5 ${bracket} ${winnerLabel} - ${finalTime}`;
+        const loserName = `${category} - Fase final - Ronda 5 ${bracket} ${loserLabel} - ${finalTime}`;
+        if (winners.length === 2 && !rowsByRoundName[winnerName]) {
+          finalPlan.push({
+            pair_one_id: winners[0].id,
+            pair_two_id: winners[1].id,
+            round_name: winnerName,
+            court: courts[(position - 1) * 2] || courts[0] || "1",
+          });
+        }
+        if (losers.length === 2 && !rowsByRoundName[loserName]) {
+          finalPlan.push({
+            pair_one_id: losers[0].id,
+            pair_two_id: losers[1].id,
+            round_name: loserName,
+            court: courts[((position - 1) * 2) + 1] || courts[1] || courts[0] || "1",
+          });
+        }
+      }
+
+      return {
+        type: "semis",
+        category,
+        groupPlans,
+        finishedGroupMatches: groupPlans.reduce((sum, group) => sum + group.finishedMatches, 0),
+        totalGroupMatches: groupPlans.reduce((sum, group) => sum + group.totalMatches, 0),
+        groupReady: groupsReady,
+        allGroupResults: groupsReady,
+        semis: semifinalPlan,
+        finals: finalPlan,
+        semiTime,
+        finalTime,
+      };
+    })
+    .filter(Boolean);
+}
+
 export function computeFinalPlans(options) {
   return [
     ...computeFourPairFinalPlans(options).map((plan) => ({ ...plan, type: "semis" })),
     ...computeGroupPlacementFinalPlans(options),
+    ...computeFourGroupFinalPlans(options),
   ];
 }
 

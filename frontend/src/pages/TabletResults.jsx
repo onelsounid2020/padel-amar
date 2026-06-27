@@ -525,7 +525,7 @@ export function TabletResults({
           </article>
 
           <article className="tablet-final-card">
-            <header><div><strong>Semifinales y finales dinámicas</strong><span>Para formatos de 4 u 8 parejas</span></div></header>
+            <header><div><strong>Semifinales y finales dinámicas</strong><span>Para formatos de 4, 8 o 16 parejas</span></div></header>
             {dynamicFinalPlans.length ? dynamicFinalPlans.map((plan) => (
               <section className="tablet-dynamic-plan" key={plan.category}>
                 <div><strong>{plan.category}</strong><span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span></div>
