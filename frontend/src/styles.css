@@ -6619,18 +6619,18 @@ h3 {
 
 .tablet-match-grid {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
 }
 
 .tablet-match {
   background: #ffffff;
   border: 1px solid #d6e8f2;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgb(20 53 78 / 0.08);
+  border-radius: 8px;
+  box-shadow: 0 1px 6px rgb(20 53 78 / 0.08);
   display: grid;
-  gap: 7px;
-  padding: 10px;
+  gap: 5px;
+  padding: 7px;
 }
 
 .tablet-match.done {
@@ -6657,36 +6657,36 @@ h3 {
 
 .tablet-match-head span {
   background: #eaf5fb;
-  border-radius: 6px;
+  border-radius: 5px;
   color: #0e5d8f;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 900;
-  padding: 3px 8px;
+  padding: 2px 6px;
 }
 
 .tablet-match-head strong {
   background: linear-gradient(135deg, #0f6ea8, #13a66f);
-  border-radius: 8px;
+  border-radius: 7px;
   color: #fff;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 900;
   justify-self: center;
   letter-spacing: 0.04em;
-  padding: 4px 12px;
+  padding: 3px 10px;
   text-align: center;
   text-transform: uppercase;
 }
 
 .tablet-match-head em {
   background: #08223b;
-  border-radius: 6px;
+  border-radius: 5px;
   color: #a8e641;
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-style: normal;
   font-weight: 900;
-  max-width: 120px;
+  max-width: 96px;
   overflow: hidden;
-  padding: 3px 7px;
+  padding: 2px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6699,20 +6699,21 @@ h3 {
 
 .tablet-winner-pick {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   grid-template-columns: 1fr;
 }
 
 .tablet-winner-pick button {
   align-items: center;
   background: #f5fafd;
-  border: 2px solid #c8dfe9;
-  border-radius: 10px;
+  border: 1.5px solid #c8dfe9;
+  border-radius: 8px;
   box-shadow: none;
   color: #08223b;
   display: flex;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 9px;
   text-align: left;
   width: 100%;
 }
@@ -6722,16 +6723,16 @@ h3 {
   border-radius: 5px;
   color: #2a6080;
   flex-shrink: 0;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   font-weight: 900;
-  padding: 3px 7px;
+  padding: 2px 7px;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .tablet-winner-pick button strong {
   flex: 1;
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   min-width: 0;
   overflow: hidden;
   text-align: left;
@@ -6850,20 +6851,20 @@ h3 {
 
 .tablet-presets {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .tablet-presets button {
   background: #eaf4fb;
   border: 1.5px solid #b8d6e8;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: none;
   color: #0b4a72;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 900;
-  min-height: 42px;
-  padding: 0 3px;
+  min-height: 34px;
+  padding: 0 2px;
   transition: background 0.12s, border-color 0.12s;
 }
 
@@ -6878,25 +6879,25 @@ h3 {
   align-items: center;
   background: #f7fbfe;
   border: 1px solid #d6e8f2;
-  border-radius: 8px;
+  border-radius: 7px;
   display: grid;
-  gap: 5px;
-  grid-template-columns: 1fr 46px 14px 46px;
-  padding: 5px 8px;
+  gap: 4px;
+  grid-template-columns: 1fr 40px 10px 40px;
+  padding: 4px 6px;
 }
 
 .tablet-manual-score span {
   color: #5c788a;
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: 900;
   text-transform: uppercase;
 }
 
 .tablet-manual-score input {
-  border-radius: 6px;
-  font-size: 1.05rem;
+  border-radius: 5px;
+  font-size: 0.94rem;
   font-weight: 900;
-  min-height: 34px;
+  min-height: 30px;
   padding: 2px;
   text-align: center;
 }
@@ -6908,15 +6909,16 @@ h3 {
 
 .tablet-score-state {
   align-items: center;
-  border-radius: 8px;
+  border-radius: 7px;
   display: flex;
   gap: 6px;
   justify-content: space-between;
-  min-height: 32px;
-  padding: 5px 8px;
+  min-height: 28px;
+  padding: 4px 7px;
 }
 
 .tablet-score-state span {
+  font-size: 0.84rem;
   font-weight: 900;
 }
 
@@ -6961,9 +6963,9 @@ h3 {
 }
 
 .tablet-save {
-  border-radius: 10px;
-  font-size: 0.9rem;
-  min-height: 44px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  min-height: 36px;
   padding: 0 8px;
 }
 
@@ -7524,7 +7526,7 @@ h3 {
 
 @media (max-width: 1023px) {
   .tablet-match-grid {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
   }
 
   .tablet-side-panels,
