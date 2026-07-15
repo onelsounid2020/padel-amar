@@ -64,6 +64,27 @@ function normalizeScore(value) {
   return value === null || value === undefined ? "" : String(value);
 }
 
+function scoreDraftStorageKey(eventId) {
+  return `amar_tablet_score_drafts_${eventId || "none"}`;
+}
+
+function readScoreDrafts(eventId) {
+  if (!eventId || typeof window === "undefined") return {};
+  try {
+    const value = JSON.parse(window.localStorage.getItem(scoreDraftStorageKey(eventId)) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeScoreDrafts(eventId, drafts) {
+  if (!eventId || typeof window === "undefined") return;
+  const key = scoreDraftStorageKey(eventId);
+  if (Object.keys(drafts).length) window.localStorage.setItem(key, JSON.stringify(drafts));
+  else window.localStorage.removeItem(key);
+}
+
 function shortenPairName(fullName) {
   return String(fullName || "")
     .split(" / ")
@@ -144,7 +165,7 @@ export function TabletResults({
 }) {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [roundFilter, setRoundFilter] = useState("next");
-  const [statusFilter, setStatusFilter] = useState("pending");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [scores, setScores] = useState({});
   const [winnerSide, setWinnerSide] = useState({});
   const [activeTabletTab, setActiveTabletTab] = useState("scores");
@@ -182,14 +203,32 @@ export function TabletResults({
     }), [matches, pairById]);
 
   useEffect(() => {
-    setScores(Object.fromEntries(matches.map((match) => [
-      match.id,
-      {
+    const savedDrafts = readScoreDrafts(selectedEventId);
+    const nextScores = {};
+    const activeDrafts = {};
+    matches.forEach((match) => {
+      const serverScore = {
         pair_one_score: normalizeScore(match.pair_one_score),
         pair_two_score: normalizeScore(match.pair_two_score),
-      },
-    ])));
-  }, [matches]);
+      };
+      const draft = savedDrafts[match.id];
+      const draftIsDifferent = Boolean(draft) && (
+        normalizeScore(draft.pair_one_score) !== serverScore.pair_one_score
+        || normalizeScore(draft.pair_two_score) !== serverScore.pair_two_score
+      );
+      if (draftIsDifferent) {
+        nextScores[match.id] = {
+          pair_one_score: normalizeScore(draft.pair_one_score),
+          pair_two_score: normalizeScore(draft.pair_two_score),
+        };
+        activeDrafts[match.id] = nextScores[match.id];
+      } else {
+        nextScores[match.id] = serverScore;
+      }
+    });
+    setScores(nextScores);
+    writeScoreDrafts(selectedEventId, activeDrafts);
+  }, [matches, selectedEventId]);
 
   const categories = [...new Set(matchRows.map((row) => row.category))];
   const rounds = [...new Map(matchRows.map((row) => [row.roundKey, { key: row.roundKey, label: row.roundLabel, number: row.roundNumber }])).values()]
@@ -227,6 +266,11 @@ export function TabletResults({
     return normalizeScore(current.pair_one_score) !== normalizeScore(row.match.pair_one_score)
       || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
   });
+  const draftCount = matchRows.filter((row) => {
+    const current = scores[row.match.id] || {};
+    return normalizeScore(current.pair_one_score) !== normalizeScore(row.match.pair_one_score)
+      || normalizeScore(current.pair_two_score) !== normalizeScore(row.match.pair_two_score);
+  }).length;
 
   useEffect(() => {
     if (hasUnsavedScores || loading) return undefined;
@@ -236,37 +280,54 @@ export function TabletResults({
     return () => window.clearInterval(interval);
   }, [hasUnsavedScores, loading, onRefresh]);
 
+  function updateScoreDraft(matchId, nextScore) {
+    const match = matches.find((item) => item.id === matchId);
+    const drafts = readScoreDrafts(selectedEventId);
+    const differsFromServer = match && (
+      normalizeScore(nextScore.pair_one_score) !== normalizeScore(match.pair_one_score)
+      || normalizeScore(nextScore.pair_two_score) !== normalizeScore(match.pair_two_score)
+    );
+    if (differsFromServer) drafts[matchId] = nextScore;
+    else delete drafts[matchId];
+    writeScoreDrafts(selectedEventId, drafts);
+  }
+
   function setScore(matchId, field, value) {
-    const numericValue = Math.max(0, Number(value || 0));
-    setScores((current) => ({
-      ...current,
-      [matchId]: {
+    const numericValue = value === "" ? "" : String(Math.max(0, Number(value)));
+    setScores((current) => {
+      const nextScore = {
         pair_one_score: current[matchId]?.pair_one_score ?? "",
         pair_two_score: current[matchId]?.pair_two_score ?? "",
-        [field]: String(numericValue),
-      },
-    }));
+        [field]: numericValue,
+      };
+      updateScoreDraft(matchId, nextScore);
+      return { ...current, [matchId]: nextScore };
+    });
   }
 
   function applyPreset(matchId, winner, winnerScore, loserScore) {
+    const nextScore = {
+      pair_one_score: String(winner === "one" ? winnerScore : loserScore),
+      pair_two_score: String(winner === "two" ? winnerScore : loserScore),
+    };
     setWinnerSide((current) => ({ ...current, [matchId]: winner }));
     setScores((current) => ({
       ...current,
-      [matchId]: {
-        pair_one_score: String(winner === "one" ? winnerScore : loserScore),
-        pair_two_score: String(winner === "two" ? winnerScore : loserScore),
-      },
+      [matchId]: nextScore,
     }));
+    updateScoreDraft(matchId, nextScore);
   }
 
   function resetMatchScore(row) {
+    const serverScore = {
+      pair_one_score: normalizeScore(row.match.pair_one_score),
+      pair_two_score: normalizeScore(row.match.pair_two_score),
+    };
     setScores((current) => ({
       ...current,
-      [row.match.id]: {
-        pair_one_score: normalizeScore(row.match.pair_one_score),
-        pair_two_score: normalizeScore(row.match.pair_two_score),
-      },
+      [row.match.id]: serverScore,
     }));
+    updateScoreDraft(row.match.id, serverScore);
   }
 
   function saveMatch(matchId) {
@@ -295,7 +356,7 @@ export function TabletResults({
     <section className="tablet-page">
       <div className="tablet-top">
         <strong>{selectedEvent ? selectedEvent.name : "Mesa de resultados"}</strong>
-        <span>{completedCount}/{matchRows.length} cargados · {pendingCount} pendientes{hasUnsavedScores ? " · cambios sin guardar" : ""}</span>
+        <span>{completedCount}/{matchRows.length} cargados · {pendingCount} pendientes{draftCount ? ` · ${draftCount} borrador${draftCount === 1 ? "" : "es"} protegido${draftCount === 1 ? "" : "s"}` : ""}</span>
         <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)}>
           <option value="">Evento</option>
           {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
@@ -327,9 +388,9 @@ export function TabletResults({
           {rounds.map((round) => <option key={round.key} value={round.key}>{round.label}</option>)}
         </select>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="pending">Pendientes</option>
+          <option value="all">Todos · guardados y pendientes</option>
+          <option value="pending">Solo pendientes</option>
           <option value="done">Cargados</option>
-          <option value="all">Todos</option>
         </select>
       </div>}
 
@@ -405,8 +466,8 @@ export function TabletResults({
                   onChange={(event) => setScore(row.match.id, "pair_two_score", event.target.value)}
                 />
               </div>
-              <div className={`tablet-score-state ${state.tone}`}>
-                <span>{state.label}</span>
+              <div className={`tablet-score-state ${row.done && !isDirty ? "saved" : state.tone}`}>
+                <span>{row.done && !isDirty ? `Resultado guardado · ${current.pair_one_score}-${current.pair_two_score}` : state.label}</span>
                 {isDirty && (
                   <button type="button" onClick={() => resetMatchScore(row)} title="Deshacer cambios">
                     <RotateCcw size={14} /> Deshacer

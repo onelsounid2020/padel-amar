@@ -6927,6 +6927,12 @@ h3 {
   color: #0a6f54;
 }
 
+.tablet-score-state.saved {
+  background: #dff6e8;
+  border: 1px solid #70c995;
+  color: #075f47;
+}
+
 .tablet-score-state.warning,
 .tablet-score-state.pending {
   background: #fff8e8;
