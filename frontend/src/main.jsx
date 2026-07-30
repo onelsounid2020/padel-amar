@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { ApiError, api, setAuthToken } from "./api/client";
 import { computeFinalPlans, computeFinalRanking, computeRankingPlacementFixture } from "./lib/fixtureFinals";
-import { pairName } from "./lib/pairs";
+import { pairName, rankingGroupByPair, rankingGroupClass } from "./lib/pairs";
 import { TabletResults } from "./pages/TabletResults";
 import "./styles.css";
 
@@ -2579,6 +2579,7 @@ function PlayerResultsView({
     acc[cat] = [...(acc[cat] || []), s];
     return acc;
   }, {}), [standings]);
+  const rankingGroups = useMemo(() => rankingGroupByPair(matches), [matches]);
   const conflictCount = resultSubmissions.filter((s) => s.status === "conflicto").length;
   const pendingCount = userMatches.filter((m) => !matchHasResult(m)).length;
 
@@ -2687,21 +2688,25 @@ function PlayerResultsView({
                 <div className="ranking-row ranking-header">
                   <span>#</span><span>Pareja</span><span>J</span><span>G</span><span>Pts</span><span>Dif</span>
                 </div>
-                {categoryStandings.map((standing) => (
-                  <div className={`ranking-row${standing.pair_id === myPair?.id ? " me" : ""}`} key={standing.id}>
+                {categoryStandings.map((standing) => {
+                  const group = rankingGroups.get(standing.pair_id);
+                  return (
+                  <div className={`ranking-row ${rankingGroupClass(group)}${standing.pair_id === myPair?.id ? " me" : ""}`} key={standing.id}>
                     <span>{standing.position}</span>
                     <span className="ranking-pair-name">
                       <span className="pair-names">
                         <span className="pair-p1">{standing.pair.player_one?.name || "—"}</span>
                         <span className={`pair-p2${standing.pair.player_two ? "" : " pair-p2-solo"}`}>{standing.pair.player_two?.name || "busca partner"}</span>
                       </span>
+                      {group && <small className="ranking-group-label">{group}</small>}
                     </span>
                     <span>{standing.played}</span>
                     <span>{standing.won}</span>
                     <span>{standing.points}</span>
                     <span>{standing.points_for - standing.points_against}</span>
                   </div>
-                ))}
+                  );
+                })}
               </article>
             )) : (
               <p className="empty">El ranking aparecerá cuando existan resultados cargados.</p>
@@ -6287,6 +6292,7 @@ function PairPerformanceModal({ standing, matches, pairs, onClose }) {
 
 function RankingBlock({ ranking, standings, matches = [], pairs = [], detailed = false }) {
   const [selectedStanding, setSelectedStanding] = useState(null);
+  const rankingGroups = rankingGroupByPair(matches);
   const standingsByCategory = standings.reduce((groups, standing) => {
     const category = standing.pair.category || "Sin categoria";
     groups[category] = [...(groups[category] || []), standing];
@@ -6316,9 +6322,11 @@ function RankingBlock({ ranking, standings, matches = [], pairs = [], detailed =
                 <span>Dif</span>
                 <span>Pts</span>
               </div>
-              {categoryStandings.map((standing) => (
+              {categoryStandings.map((standing) => {
+                const group = rankingGroups.get(standing.pair_id);
+                return (
                 <div
-                  className={`ranking-row ranking-drill-row ${detailed ? "detailed" : ""}`}
+                  className={`ranking-row ranking-drill-row ${rankingGroupClass(group)} ${detailed ? "detailed" : ""}`}
                   key={standing.id}
                   role="button"
                   tabIndex={0}
@@ -6337,6 +6345,7 @@ function RankingBlock({ ranking, standings, matches = [], pairs = [], detailed =
                       <span className="pair-p1">{standing.pair.player_one?.name || "—"}</span>
                       <span className={`pair-p2${standing.pair.player_two ? "" : " pair-p2-solo"}`}>{standing.pair.player_two?.name || "busca partner"}</span>
                     </span>
+                    {group && <small className="ranking-group-label">{group}</small>}
                     <Eye size={14} />
                   </span>
                   <span>{standing.played}</span>
@@ -6348,7 +6357,8 @@ function RankingBlock({ ranking, standings, matches = [], pairs = [], detailed =
                   <span>{standing.points_for - standing.points_against}</span>
                   <span>{standing.points}</span>
                 </div>
-              ))}
+                );
+              })}
             </article>
           ))}
         </div>

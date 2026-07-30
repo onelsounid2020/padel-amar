@@ -3,7 +3,7 @@ import { Check, Medal, RefreshCw, RotateCcw, Save, Trophy } from "lucide-react";
 
 import { api } from "../api/client";
 import { computeFinalPlans, computeFinalRanking, computeRankingPlacementFixture } from "../lib/fixtureFinals";
-import { pairName } from "../lib/pairs";
+import { pairName, rankingGroupByPair, rankingGroupClass } from "../lib/pairs";
 
 function parseFixtureRound(roundName) {
   const parts = (roundName || "Sin categoria - Turno").split(" - ");
@@ -243,6 +243,7 @@ export function TabletResults({
     groups[category] = [...(groups[category] || []), standing];
     return groups;
   }, {});
+  const rankingGroups = useMemo(() => rankingGroupByPair(matches), [matches]);
   const dynamicFinalPlans = useMemo(() => {
     const fixtureConfig = selectedEvent?.fixture_config || {};
     return computeFinalPlans({ pairs, matches, standings, fixtureConfig });
@@ -503,10 +504,11 @@ export function TabletResults({
                   const draw = standing.played - standing.won - standing.lost;
                   const difference = standing.points_for - standing.points_against;
                   const tiedByPoints = categoryStandings.filter((item) => item.points === standing.points).length > 1;
+                  const group = rankingGroups.get(standing.pair_id);
                   return (
-                    <div className={`tablet-ranking-row position-${standing.position} ${tiedByPoints ? "tied" : ""}`} key={standing.id}>
+                    <div className={`tablet-ranking-row position-${standing.position} ${rankingGroupClass(group)} ${tiedByPoints ? "tied" : ""}`} key={standing.id}>
                       <span>{standing.position}</span>
-                      <strong>{pairName(standing.pair)}</strong>
+                      <strong>{pairName(standing.pair)}{group && <small className="ranking-group-label">{group}</small>}</strong>
                       <small>
                         <em>J {standing.played}</em>
                         <em>G {standing.won}</em>
