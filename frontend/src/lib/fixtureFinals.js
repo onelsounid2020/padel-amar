@@ -205,7 +205,10 @@ export function computeGroupPlacementFinalPlans({ pairs, matches, fixtureConfig 
   const categories = categoryPairGroups(pairs);
 
   return Object.entries(categories)
-    .filter(([, categoryPairs]) => categoryPairs.length === 8)
+    .filter(([category, categoryPairs]) => (
+      categoryPairs.length === 8
+      && fixtureConfig.category_playoff_modes?.[category] !== "crossed_semifinals"
+    ))
     .map(([category]) => {
       const categoryRows = matchRows.filter((row) => row.category === category);
       const groupRows = categoryRows.filter((row) => /^Grupo\s+/i.test(row.schedule.group || ""));
@@ -291,6 +294,138 @@ export function computeGroupPlacementFinalPlans({ pairs, matches, fixtureConfig 
         allGroupResults: groupsReady,
         placementTime,
         placementMatches,
+      };
+    })
+    .filter(Boolean);
+}
+
+export function computeTwoGroupCrossedFinalPlans({ pairs, matches, fixtureConfig = {} }) {
+  const pairById = new Map(pairs.map((pair) => [pair.id, pair]));
+  const setMinutes = Number(fixtureConfig.set_minutes || 20);
+  const fallbackStart = fixtureConfig.start_time || "17:00";
+  const matchRows = matches.map((match) => {
+    const schedule = parseFixtureRound(match.round_name);
+    const pairOne = pairById.get(match.pair_one_id);
+    const pairTwo = pairById.get(match.pair_two_id);
+    const category = fixtureCategoryFromPairs(pairOne, pairTwo, schedule.category);
+    return { match, schedule, pairOne, pairTwo, category, done: hasResult(match) };
+  });
+  const categories = categoryPairGroups(pairs);
+
+  return Object.entries(categories)
+    .filter(([category, categoryPairs]) => (
+      categoryPairs.length === 8
+      && fixtureConfig.category_playoff_modes?.[category] === "crossed_semifinals"
+    ))
+    .map(([category]) => {
+      const categoryRows = matchRows.filter((row) => row.category === category);
+      const groupRows = categoryRows.filter((row) => /^Grupo\s+/i.test(row.schedule.group || ""));
+      const groups = groupRows.reduce((collection, row) => {
+        collection[row.schedule.group] = [...(collection[row.schedule.group] || []), row];
+        return collection;
+      }, {});
+      const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 2);
+      if (groupNames.length !== 2) return null;
+
+      const groupPlans = groupNames.map((groupName) => {
+        const rows = groups[groupName];
+        const standingsMap = new Map();
+        rows.forEach((row) => {
+          [row.pairOne, row.pairTwo].filter(Boolean).forEach((pair) => {
+            if (!standingsMap.has(pair.id)) standingsMap.set(pair.id, emptyGroupStanding(pair));
+          });
+        });
+        rows.forEach((row) => {
+          if (!hasResult(row.match)) return;
+          const one = standingsMap.get(row.match.pair_one_id);
+          const two = standingsMap.get(row.match.pair_two_id);
+          if (!one || !two) return;
+          const oneScore = Number(row.match.pair_one_score);
+          const twoScore = Number(row.match.pair_two_score);
+          one.played += 1;
+          two.played += 1;
+          one.pointsFor += oneScore;
+          one.pointsAgainst += twoScore;
+          two.pointsFor += twoScore;
+          two.pointsAgainst += oneScore;
+          if (oneScore > twoScore) {
+            one.won += 1;
+            one.points += 3;
+          } else if (twoScore > oneScore) {
+            two.won += 1;
+            two.points += 3;
+          } else {
+            one.points += 1;
+            two.points += 1;
+          }
+        });
+        return {
+          groupName,
+          rows,
+          standings: sortGroupStandings([...standingsMap.values()]),
+          totalMatches: 6,
+          finishedMatches: rows.filter((row) => row.done).length,
+        };
+      });
+
+      const groupsReady = groupPlans.every((group) => (
+        group.rows.length >= group.totalMatches
+        && group.finishedMatches >= group.totalMatches
+        && group.standings.length === 4
+      ));
+      const groupEndTimes = groupRows.map((row) => slotEndMinutes(row.schedule.time || row.schedule.turn)).filter(Boolean);
+      const latestEnd = groupEndTimes.length ? Math.max(...groupEndTimes) : minutesFromSlot(fallbackStart);
+      const semiTime = playoffSlotLabel(latestEnd, setMinutes, 0);
+      const finalTime = playoffSlotLabel(latestEnd, setMinutes, 1);
+      const courts = [...new Set(groupRows.map((row) => row.match.court).filter(Boolean))]
+        .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+      const existingSemiOne = categoryRows.find((row) => /Fase final.*Semifinal 1/i.test(row.match.round_name || ""))?.match;
+      const existingSemiTwo = categoryRows.find((row) => /Fase final.*Semifinal 2/i.test(row.match.round_name || ""))?.match;
+      const existingFinal = categoryRows.find((row) => /Fase final.*Ronda 5.*\bFinal\b/i.test(row.match.round_name || ""))?.match;
+      const firstA = groupPlans[0].standings[0]?.pair;
+      const secondA = groupPlans[0].standings[1]?.pair;
+      const firstB = groupPlans[1].standings[0]?.pair;
+      const secondB = groupPlans[1].standings[1]?.pair;
+      const semis = groupsReady ? [
+        !existingSemiOne && firstA && secondB ? {
+          pair_one_id: firstA.id,
+          pair_two_id: secondB.id,
+          round_name: `${category} - Fase final - Ronda 4 Semifinal 1 (1A vs 2B) - ${semiTime}`,
+          court: courts[0] || "1",
+        } : null,
+        !existingSemiTwo && firstB && secondA ? {
+          pair_one_id: firstB.id,
+          pair_two_id: secondA.id,
+          round_name: `${category} - Fase final - Ronda 4 Semifinal 2 (1B vs 2A) - ${semiTime}`,
+          court: courts[1] || courts[0] || "1",
+        } : null,
+      ].filter(Boolean) : [];
+
+      const semiOneResult = resolveMatchResult(existingSemiOne);
+      const semiTwoResult = resolveMatchResult(existingSemiTwo);
+      const winners = [semiOneResult.winnerId, semiTwoResult.winnerId].filter(Boolean);
+      const finals = winners.length === 2 && !existingFinal ? [{
+        pair_one_id: winners[0],
+        pair_two_id: winners[1],
+        round_name: `${category} - Fase final - Ronda 5 Final - ${finalTime}`,
+        court: courts[0] || "1",
+      }] : [];
+
+      return {
+        type: "crossed_semis",
+        category,
+        groupPlans,
+        finishedGroupMatches: groupPlans.reduce((sum, group) => sum + group.finishedMatches, 0),
+        totalGroupMatches: groupPlans.reduce((sum, group) => sum + group.totalMatches, 0),
+        groupReady: groupsReady,
+        allGroupResults: groupsReady,
+        semis,
+        finals,
+        existingSemiOne,
+        existingSemiTwo,
+        existingFinal,
+        semiTime,
+        finalTime,
       };
     })
     .filter(Boolean);
@@ -468,6 +603,7 @@ export function computeFourGroupFinalPlans({ pairs, matches, fixtureConfig = {} 
 export function computeFinalPlans(options) {
   return [
     ...computeFourPairFinalPlans(options).map((plan) => ({ ...plan, type: "semis" })),
+    ...computeTwoGroupCrossedFinalPlans(options),
     ...computeGroupPlacementFinalPlans(options),
     ...computeFourGroupFinalPlans(options),
   ];
@@ -480,7 +616,7 @@ function placementLabel(position) {
 }
 
 function isRankingPlacementMatch(match) {
-  return /Fase final.*Ronda 5.*(Final oro y plata|Partido por bronce|Definición puestos)/i.test(match.round_name || "");
+  return /Fase final.*Ronda 5.*(Final oro y plata|Partido por bronce|Definición puestos|\bFinal\b)/i.test(match.round_name || "");
 }
 
 export function computeRankingPlacementFixture({ pairs, matches, standings, fixtureConfig = {} }) {
@@ -494,7 +630,9 @@ export function computeRankingPlacementFixture({ pairs, matches, standings, fixt
     return groups;
   }, {});
 
-  return Object.entries(standingsByCategory).map(([category, categoryStandings]) => {
+  return Object.entries(standingsByCategory)
+    .filter(([category]) => fixtureConfig.category_playoff_modes?.[category] !== "crossed_semifinals")
+    .map(([category, categoryStandings]) => {
     const orderedStandings = [...categoryStandings].sort((left, right) => left.position - right.position);
     const categoryMatches = matches.filter((match) => {
       const pair = pairById.get(match.pair_one_id) || pairById.get(match.pair_two_id);
@@ -560,6 +698,7 @@ export function computeRankingPlacementFixture({ pairs, matches, standings, fixt
 function placementPositions(roundName) {
   if (/Final oro y plata/i.test(roundName || "")) return [1, 2];
   if (/Partido por bronce/i.test(roundName || "")) return [3, 4];
+  if (/Fase final.*Ronda 5.*\bFinal\b/i.test(roundName || "")) return [1, 2];
   const match = (roundName || "").match(/Definición puestos\s+(\d+)\s+y\s+(\d+)/i);
   return match ? [Number(match[1]), Number(match[2])] : null;
 }

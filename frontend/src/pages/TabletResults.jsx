@@ -592,10 +592,10 @@ export function TabletResults({
             {dynamicFinalPlans.length ? dynamicFinalPlans.map((plan) => (
               <section className="tablet-dynamic-plan" key={plan.category}>
                 <div><strong>{plan.category}</strong><span>{plan.finishedGroupMatches}/{plan.totalGroupMatches} fase</span></div>
-                <p>{plan.type === "placements" ? "Finales por posición entre grupos" : plan.semis?.length ? "Semifinales listas" : plan.finals?.length ? "Final y 3er lugar listos" : "Esperando resultados"}</p>
+                <p>{plan.type === "placements" ? "Finales por posición entre grupos" : plan.type === "crossed_semis" ? (plan.semis?.length ? "Semifinales cruzadas listas" : plan.finals?.length ? "Final lista" : "Esperando resultados") : plan.semis?.length ? "Semifinales listas" : plan.finals?.length ? "Final y 3er lugar listos" : "Esperando resultados"}</p>
                 <div className="tablet-dynamic-actions">
-                  <button type="button" disabled={!((plan.type === "placements" ? plan.placementMatches?.length : plan.semis?.length)) || loading} onClick={() => createDynamicMatches(plan.type === "placements" ? plan.placementMatches : plan.semis)}>Crear R4</button>
-                  <button type="button" disabled={!plan.finals?.length || loading} onClick={() => createDynamicMatches(plan.finals)}>Crear R5</button>
+                  <button type="button" disabled={!((plan.type === "placements" ? plan.placementMatches?.length : plan.semis?.length)) || loading} onClick={() => createDynamicMatches(plan.type === "placements" ? plan.placementMatches : plan.semis)}>{plan.type === "crossed_semis" ? "Crear semifinales cruzadas" : "Crear R4"}</button>
+                  <button type="button" disabled={!plan.finals?.length || loading} onClick={() => createDynamicMatches(plan.finals)}>{plan.type === "crossed_semis" ? "Crear final" : "Crear R5"}</button>
                 </div>
               </section>
             )) : <span className="tablet-muted">No hay finales dinámicas pendientes.</span>}

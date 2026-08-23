@@ -65,10 +65,18 @@ def main() -> None:
                 "player_two_id": pair["player_two_id"],
             })
 
+    fixture_config = {
+        **source_event["fixture_config"],
+        "category_playoff_modes": {"Mujeres": "crossed_semifinals"},
+    }
+    category_configs = [
+        {"category": "Hombres", "modality": "groups", "group_size": 6, "guaranteed_matches": 5, "qualifiers_per_group": 0, "notes": "Grupo A; Onel/Arturo fijos en cancha 2."},
+        {"category": "Mujeres", "modality": "groups_crossed_semifinals", "group_size": 4, "guaranteed_matches": 3, "qualifiers_per_group": 2, "notes": "Grupos A y B; clasifican dos por grupo a semifinales cruzadas; Nathy/Judith fijas en cancha 1."},
+    ]
     api.request(f"/events/{EVENT_ID}", "PATCH", {
         "schedule": source_event["schedule"],
-        "category_configs": source_event["category_configs"],
-        "fixture_config": source_event["fixture_config"],
+        "category_configs": category_configs,
+        "fixture_config": fixture_config,
         "fixture_visible": True,
     })
     created = api.request(f"/events/{EVENT_ID}/matches/bulk", "POST", {

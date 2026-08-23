@@ -243,10 +243,11 @@ def main() -> None:
         "courts": "1, 2, 3, 4, 5, 6, 7",
         "start_time": "15:40",
         "set_minutes": 25,
+        "category_playoff_modes": {"Mujeres": "crossed_semifinals"},
     }
     category_configs = [
         {"category": "Hombres", "modality": "groups", "group_size": 6, "guaranteed_matches": 5, "qualifiers_per_group": 0, "notes": "Grupo A; Onel/Arturo fijos en cancha 2."},
-        {"category": "Mujeres", "modality": "groups", "group_size": 4, "guaranteed_matches": 3, "qualifiers_per_group": 0, "notes": "Grupos A y B; Nathy/Judith fijas en cancha 1."},
+        {"category": "Mujeres", "modality": "groups_crossed_semifinals", "group_size": 4, "guaranteed_matches": 3, "qualifiers_per_group": 2, "notes": "Grupos A y B; clasifican dos por grupo a semifinales cruzadas; Nathy/Judith fijas en cancha 1."},
     ]
     api.request(f"/events/{EVENT_ID}", "PATCH", {
         "capacity": 14,
